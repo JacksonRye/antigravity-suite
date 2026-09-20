@@ -1,0 +1,9 @@
+{
+  "name": "models/dolphin-3-0-r1-24b",
+  "displayName": "Dolphin 3.0 R1 24B (Modal A100)",
+  "description": "Uncensored Dolphin 3.0 R1 Mistral 24B on Modal A100-80GB",
+  "provider": "openai",
+  "apiKey": "modal",
+  "apiUrl": "https://truelastgonearth--dolphin-3-0-r1-24b-model-api.modal.run/v1/chat/completions",
+  "externalModelName": "dolphin-3-0-r1-24b"
+}

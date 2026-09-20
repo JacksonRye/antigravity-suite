@@ -1391,6 +1391,13 @@ window.addEventListener('DOMContentLoaded', () => {
         <button id="agy-btn-clear-logs" class="agy-btn-action">Clear</button>
       </div>
       <div class="agy-config-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="agy-toggle-wakeword" checked style="cursor:pointer;" />
+            <span><strong>Hands-Free Wake Word</strong> ("Hey Gemini" / "Hey Antigravity")</span>
+          </label>
+          <span id="agy-wakeword-status" style="font-size:11px;color:#34d399;">Active</span>
+        </div>
         <div class="agy-mic-meter-box">
           <span>Mic Volume:</span>
           <div class="agy-meter-outer"><div id="agy-mic-meter-inner" class="agy-meter-inner"></div></div>
@@ -1410,6 +1417,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const meterInner = drawer.querySelector('#agy-mic-meter-inner') as HTMLDivElement;
     const meterVal = drawer.querySelector('#agy-meter-val') as HTMLSpanElement;
     const serviceUrlInput = drawer.querySelector('#agy-service-url-input') as HTMLInputElement;
+    const wakeWordToggle = drawer.querySelector('#agy-toggle-wakeword') as HTMLInputElement;
+    const wakeWordStatus = drawer.querySelector('#agy-wakeword-status') as HTMLSpanElement;
 
     // Restore cached service URL
     try {
@@ -2210,6 +2219,13 @@ window.addEventListener('DOMContentLoaded', () => {
       if (meterVal) meterVal.textContent = '0%';
       updateUiState('idle');
       logMsg('SESSION', 'Live voice session stopped.', 'info');
+
+      // Resume hands-free wake word listener when returning to idle
+      if (wakeWordEnabled) {
+        setTimeout(() => {
+          startWakeWordListener();
+        }, 500);
+      }
     }
 
     function handleVoiceTrigger() {
@@ -2226,6 +2242,160 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     micBtn.addEventListener('click', handleVoiceTrigger);
+
+    // ─── Hands-Free Wake Word Engine ("Hey Gemini" / "Hey Antigravity") ───
+    let wakeWordEnabled = true;
+    try {
+      const savedWakeSetting = localStorage.getItem('agy_wakeword_enabled');
+      if (savedWakeSetting !== null) {
+        wakeWordEnabled = savedWakeSetting === 'true';
+      }
+    } catch (_) {}
+
+    if (wakeWordToggle) {
+      wakeWordToggle.checked = wakeWordEnabled;
+      if (wakeWordStatus) {
+        wakeWordStatus.textContent = wakeWordEnabled ? 'Active' : 'Disabled';
+        wakeWordStatus.style.color = wakeWordEnabled ? '#34d399' : '#9ca3af';
+      }
+      wakeWordToggle.addEventListener('change', () => {
+        wakeWordEnabled = wakeWordToggle.checked;
+        try {
+          localStorage.setItem('agy_wakeword_enabled', String(wakeWordEnabled));
+        } catch (_) {}
+        if (wakeWordStatus) {
+          wakeWordStatus.textContent = wakeWordEnabled ? 'Active' : 'Disabled';
+          wakeWordStatus.style.color = wakeWordEnabled ? '#34d399' : '#9ca3af';
+        }
+        if (wakeWordEnabled) {
+          startWakeWordListener();
+        } else {
+          stopWakeWordListener();
+        }
+        logMsg('WAKE', `Hands-free wake word ${wakeWordEnabled ? 'enabled' : 'disabled'}.`, 'info');
+      });
+    }
+
+    let wakeRecognition: any = null;
+    let wakeWordRestartTimer: any = null;
+    let isWakeWordRunning = false;
+
+    function isWakePhrase(text: string): { matched: boolean; query: string } {
+      const clean = text.toLowerCase().trim();
+      // Patterns matching: "hey gemini", "hey antigravity", "ok gemini", "gemini", "antigravity"
+      const wakeRegex = /^(?:hey\s+|ok\s+|hello\s+)?(?:gemini|antigravity)(?:\s*[,:\-]?\s*(.*))?$/i;
+      const match = clean.match(wakeRegex);
+      if (match) {
+        return { matched: true, query: (match[1] || '').trim() };
+      }
+      // Also check if wake phrase appears anywhere near the start of the utterance
+      const subMatch = clean.match(/\b(?:hey|ok|hello)?\s*(?:gemini|antigravity)\b\s*[,:\-]?\s*(.*)/i);
+      if (subMatch) {
+        return { matched: true, query: (subMatch[1] || '').trim() };
+      }
+      return { matched: false, query: '' };
+    }
+
+    function startWakeWordListener() {
+      if (!wakeWordEnabled || isWakeWordRunning) return;
+      if (voiceState !== 'idle') return; // Do not run wake recognizer while active Live session is running
+
+      const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRec) {
+        logMsg('WAKE', 'SpeechRecognition API not available in this environment.', 'warn');
+        return;
+      }
+
+      try {
+        if (wakeRecognition) {
+          try {
+            wakeRecognition.abort();
+          } catch (_) {}
+          wakeRecognition = null;
+        }
+
+        const rec = new SpeechRec();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onstart = () => {
+          isWakeWordRunning = true;
+          logMsg('WAKE', 'Hands-free wake listener active (listening for "Hey Gemini" / "Hey Antigravity")...', 'vad');
+        };
+
+        rec.onresult = (event: any) => {
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            const isFinal = event.results[i].isFinal;
+            const { matched, query } = isWakePhrase(transcript);
+
+            if (matched) {
+              logMsg('WAKE', `Wake word triggered: "${transcript}" (Query: "${query || '[none]'}")`, 'success');
+              stopWakeWordListener();
+
+              // Immediately wake up Gemini Live
+              void startVoiceSession();
+
+              // If a follow-up query was spoken in the same breath, send it as initial text to Gemini Live
+              if (query && query.length > 1) {
+                setTimeout(() => {
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    logMsg('WAKE', `Sending initial voice prompt query: "${query}"`, 'info');
+                    ws.send(JSON.stringify({ text: query }));
+                  }
+                }, 350);
+              }
+              break;
+            }
+          }
+        };
+
+        rec.onerror = (e: any) => {
+          if (e.error !== 'no-speech' && e.error !== 'aborted') {
+            logMsg('WAKE', `Wake listener notice: ${e.error}`, 'warn');
+          }
+        };
+
+        rec.onend = () => {
+          isWakeWordRunning = false;
+          // Automatically keep alive if session is still idle and wake word is enabled
+          if (wakeWordEnabled && voiceState === 'idle') {
+            if (wakeWordRestartTimer) clearTimeout(wakeWordRestartTimer);
+            wakeWordRestartTimer = setTimeout(() => {
+              startWakeWordListener();
+            }, 300);
+          }
+        };
+
+        wakeRecognition = rec;
+        rec.start();
+      } catch (err: any) {
+        isWakeWordRunning = false;
+        logMsg('WAKE', `Could not initialize wake listener: ${err.message}`, 'error');
+      }
+    }
+
+    function stopWakeWordListener() {
+      isWakeWordRunning = false;
+      if (wakeWordRestartTimer) {
+        clearTimeout(wakeWordRestartTimer);
+        wakeWordRestartTimer = null;
+      }
+      if (wakeRecognition) {
+        try {
+          wakeRecognition.abort();
+        } catch (_) {}
+        wakeRecognition = null;
+      }
+    }
+
+    // Initialize wake word listener on startup
+    if (wakeWordEnabled) {
+      setTimeout(() => {
+        startWakeWordListener();
+      }, 1000);
+    }
 
     // Global Keybindings:
     // - Cmd+Shift+V / Ctrl+Shift+V: Hands-Free Voice Toggle

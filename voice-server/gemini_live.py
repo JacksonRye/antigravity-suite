@@ -1,0 +1,231 @@
+import asyncio
+import inspect
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
+from google import genai
+from google.genai import types
+
+class GeminiLive:
+    """
+    Handles the interaction with the Gemini Live API.
+    """
+    def __init__(self, api_key, model, input_sample_rate, tools=None, tool_mapping=None):
+        """
+        Initializes the GeminiLive client.
+
+        Args:
+            api_key (str): The Gemini API Key.
+            model (str): The model name to use.
+            input_sample_rate (int): The sample rate for audio input.
+            tools (list, optional): List of tools to enable. Defaults to None.
+            tool_mapping (dict, optional): Mapping of tool names to functions. Defaults to None.
+        """
+        self.api_key = api_key
+        self.model = model
+        self.input_sample_rate = input_sample_rate
+        import os
+        if os.getenv("GOOGLE_GENAI_USE_ENTERPRISE") == "True" or not api_key:
+            self.client = genai.Client()
+        else:
+            self.client = genai.Client(api_key=api_key)
+        self.tools = tools or []
+        self.tool_mapping = tool_mapping or {}
+
+    async def start_session(self, audio_input_queue, video_input_queue, text_input_queue, audio_output_callback, audio_interrupt_callback=None):
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Puck"
+                    )
+                )
+            ),
+            system_instruction=types.Content(parts=[types.Part(text="""You are the AI Pair-Programming Butler paired with the developer using Antigravity IDE.
+Your relationship to Antigravity:
+1. You are the VOICE BUTLER. Antigravity is the IDE and its on-screen coding agent in the chat panel.
+2. You have full visibility into the Antigravity chat window and editor via real-time context updates sent to you.
+3. When the developer asks if you can see what is in the chat, confirm that you can see it and briefly cite or summarize what is currently in the chat.
+4. Keep spoken responses natural, engaging, and conversational. Talk like an expert, friendly pair-programming partner sitting right next to the developer.
+5. When the developer discusses tasks or features, discuss approaches and requirements verbally.
+6. When the developer asks about earlier decisions, history, or context in this session, call the get_active_chat_context tool. When answering, first verbally announce that you checked the chat transcript using your tool (e.g. 'I checked our chat transcript using the context tool...').
+7. When the on-screen Antigravity coding agent finishes executing a task, give a detailed, substantive spoken breakdown (3 to 5 clear sentences). Walk through what was accomplished: explain the developer's original goal, highlight the specific changes and files touched, give the final outcome, and ask what to tackle next so the developer doesn't miss a thing.
+8. Never read raw code blocks, file diffs, or markdown tables aloud.""")]),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            realtime_input_config=types.RealtimeInputConfig(
+                turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
+            ),
+            tools=self.tools,
+        )
+        
+        logger.info(f"Connecting to Gemini Live with model={self.model}")
+        try:
+          async with self.client.aio.live.connect(model=self.model, config=config) as session:
+            logger.info("Gemini Live session opened successfully")
+            
+            async def send_audio():
+                try:
+                    while True:
+                        chunk = await audio_input_queue.get()
+                        await session.send_realtime_input(
+                            audio=types.Blob(data=chunk, mime_type=f"audio/pcm;rate={self.input_sample_rate}")
+                        )
+                except asyncio.CancelledError:
+                    logger.debug("send_audio task cancelled")
+                except Exception as e:
+                    logger.error(f"send_audio error: {e}\n{traceback.format_exc()}")
+
+            async def send_video():
+                try:
+                    while True:
+                        chunk = await video_input_queue.get()
+                        logger.info(f"Sending video frame to Gemini: {len(chunk)} bytes")
+                        await session.send_realtime_input(
+                            video=types.Blob(data=chunk, mime_type="image/jpeg")
+                        )
+                except asyncio.CancelledError:
+                    logger.debug("send_video task cancelled")
+                except Exception as e:
+                    logger.error(f"send_video error: {e}\n{traceback.format_exc()}")
+
+            async def send_text():
+                try:
+                    while True:
+                        msg = await text_input_queue.get()
+                        if isinstance(msg, dict):
+                            text = msg.get("text", "")
+                            turn_complete = msg.get("turn_complete", True)
+                        else:
+                            text = str(msg)
+                            turn_complete = True
+                        logger.info(f"Sending text to Gemini (turn_complete={turn_complete}): {text[:100]}...")
+                        await session.send_client_content(
+                            turns=[types.Content(role="user", parts=[types.Part(text=text)])],
+                            turn_complete=turn_complete,
+                        )
+                except asyncio.CancelledError:
+                    logger.debug("send_text task cancelled")
+                except Exception as e:
+                    logger.error(f"send_text error: {e}\n{traceback.format_exc()}")
+
+            event_queue = asyncio.Queue()
+
+            async def receive_loop():
+                try:
+                    while True:
+                        async for response in session.receive():
+                            logger.debug(f"Received response from Gemini: {response}")
+                            
+                            # Log the raw response type for debugging
+                            if response.go_away:
+                                logger.warning(f"Received GoAway from Gemini: {response.go_away}")
+                            if response.session_resumption_update:
+                                logger.info(f"Session resumption update: {response.session_resumption_update}")
+                            
+                            server_content = response.server_content
+                            tool_call = response.tool_call
+                            
+                            if server_content:
+                                if server_content.model_turn:
+                                    for part in server_content.model_turn.parts:
+                                        if part.inline_data:
+                                            if inspect.iscoroutinefunction(audio_output_callback):
+                                                await audio_output_callback(part.inline_data.data)
+                                            else:
+                                                audio_output_callback(part.inline_data.data)
+                                
+                                if server_content.input_transcription and server_content.input_transcription.text:
+                                    await event_queue.put({"type": "user", "text": server_content.input_transcription.text})
+                                
+                                if server_content.output_transcription and server_content.output_transcription.text:
+                                    await event_queue.put({"type": "gemini", "text": server_content.output_transcription.text})
+                                
+                                if server_content.interaction_status:
+                                    status_val = server_content.interaction_status
+                                    status_str = status_val.name if hasattr(status_val, 'name') else str(status_val)
+                                    logger.debug(f"Interaction status: {status_str}")
+                                    await event_queue.put({"type": "interaction_status", "status": status_str})
+
+                                if server_content.turn_complete:
+                                    await event_queue.put({"type": "turn_complete"})
+                                
+                                if server_content.interrupted:
+                                    if audio_interrupt_callback:
+                                        if inspect.iscoroutinefunction(audio_interrupt_callback):
+                                            await audio_interrupt_callback()
+                                        else:
+                                            audio_interrupt_callback()
+                                    await event_queue.put({"type": "interrupted"})
+
+                            if tool_call:
+                                function_responses = []
+                                for fc in tool_call.function_calls:
+                                    func_name = fc.name
+                                    args = fc.args or {}
+                                    
+                                    if func_name in self.tool_mapping:
+                                        try:
+                                            tool_func = self.tool_mapping[func_name]
+                                            if inspect.iscoroutinefunction(tool_func):
+                                                result = await tool_func(**args)
+                                            else:
+                                                loop = asyncio.get_running_loop()
+                                                result = await loop.run_in_executor(None, lambda: tool_func(**args))
+                                        except Exception as e:
+                                            result = f"Error: {e}"
+                                        
+                                        function_responses.append(types.FunctionResponse(
+                                            name=func_name,
+                                            id=fc.id,
+                                            response={"result": result}
+                                        ))
+                                        await event_queue.put({"type": "tool_call", "name": func_name, "args": args, "result": result})
+                                
+                                await session.send_tool_response(function_responses=function_responses)
+                                # Gemini Live completes tool turn without audio unless prompted to generate vocal synthesis:
+                                await session.send_client_content(
+                                    turns=[types.Content(role="user", parts=[types.Part(text="Based on what you just retrieved from the tool, please give your spoken response now.")])],
+                                    turn_complete=True
+                                )
+                        
+                        # session.receive() iterator ended (e.g. after turn_complete) — re-enter to keep listening
+                        logger.debug("Gemini receive iterator completed, re-entering receive loop")
+
+                except asyncio.CancelledError:
+                    logger.debug("receive_loop task cancelled")
+                except Exception as e:
+                    logger.error(f"receive_loop error: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+                    await event_queue.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
+                finally:
+                    logger.info("receive_loop exiting")
+                    await event_queue.put(None)
+
+            send_audio_task = asyncio.create_task(send_audio())
+            send_video_task = asyncio.create_task(send_video())
+            send_text_task = asyncio.create_task(send_text())
+            receive_task = asyncio.create_task(receive_loop())
+
+            try:
+                while True:
+                    event = await event_queue.get()
+                    if event is None:
+                        break
+                    if isinstance(event, dict) and event.get("type") == "error":
+                        # Just yield the error event, don't raise to keep the stream alive if possible or let caller handle
+                        yield event
+                        break 
+                    yield event
+            finally:
+                logger.info("Cleaning up Gemini Live session tasks")
+                send_audio_task.cancel()
+                send_video_task.cancel()
+                send_text_task.cancel()
+                receive_task.cancel()
+        except Exception as e:
+            logger.error(f"Gemini Live session error: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+            raise
+        finally:
+            logger.info("Gemini Live session closed")

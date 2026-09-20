@@ -35,6 +35,9 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_APP_HOST = os.getenv("TWILIO_APP_HOST")
 
 from transcript_watcher import TranscriptWatcher
+from antigravity_controller import AntigravityChatController
+
+chat_controller = AntigravityChatController()
 
 # Initialize FastAPI
 app = FastAPI()
@@ -136,7 +139,7 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     async def audio_interrupt_callback():
         watcher.stop_current_playback()
 
-    chat_context_tool = types.Tool(
+    chat_tools = types.Tool(
         function_declarations=[
             types.FunctionDeclaration(
                 name="get_active_chat_context",
@@ -154,6 +157,24 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                         )
                     }
                 )
+            ),
+            types.FunctionDeclaration(
+                name="write_to_chat",
+                description="Types a prompt into the Antigravity chat input box. Set submit=True if the developer explicitly said to send, run, execute, tell the agent, or submit it immediately. Set submit=False if the developer asked to type, draft, or write it without sending.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    required=["prompt"],
+                    properties={
+                        "prompt": types.Schema(
+                            type=types.Type.STRING,
+                            description="The complete, well-formulated prompt or task instructions to write into the Antigravity chat box for the coding agent."
+                        ),
+                        "submit": types.Schema(
+                            type=types.Type.BOOLEAN,
+                            description="Whether to submit the message immediately (true) or leave it drafted in the input box for manual review (false)."
+                        )
+                    }
+                )
             )
         ]
     )
@@ -162,8 +183,11 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         api_key=GEMINI_API_KEY,
         model=MODEL,
         input_sample_rate=16000,
-        tools=[chat_context_tool],
-        tool_mapping={"get_active_chat_context": watcher.get_active_chat_context}
+        tools=[chat_tools],
+        tool_mapping={
+            "get_active_chat_context": watcher.get_active_chat_context,
+            "write_to_chat": chat_controller.write_to_chat,
+        }
     )
 
     # Initialize conversation context

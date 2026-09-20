@@ -1393,10 +1393,10 @@ window.addEventListener('DOMContentLoaded', () => {
       <div class="agy-config-box">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" id="agy-toggle-wakeword" checked style="cursor:pointer;" />
-            <span><strong>Hands-Free Wake Word</strong> ("Hey Gemini" / "Hey Antigravity")</span>
+            <input type="checkbox" id="agy-toggle-wakeword" style="cursor:pointer;" />
+            <span><strong>Hands-Free Wake Word</strong> (Experimental - Off)</span>
           </label>
-          <span id="agy-wakeword-status" style="font-size:11px;color:#34d399;">Active</span>
+          <span id="agy-wakeword-status" style="font-size:11px;color:#9ca3af;">Disabled</span>
         </div>
         <div class="agy-mic-meter-box">
           <span>Mic Volume:</span>
@@ -2243,8 +2243,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
     micBtn.addEventListener('click', handleVoiceTrigger);
 
-    // ─── Hands-Free Wake Word Engine ("Hey Gemini" / "Hey Antigravity") ───
-    let wakeWordEnabled = true;
+    // ─── Hands-Free Wake Word Engine (Disabled / On-hold) ───
+    let wakeWordEnabled = false;
     try {
       const savedWakeSetting = localStorage.getItem('agy_wakeword_enabled');
       if (savedWakeSetting !== null) {

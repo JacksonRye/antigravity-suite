@@ -195,11 +195,6 @@ Your relationship to Antigravity:
                                         await event_queue.put({"type": "tool_call", "name": func_name, "args": args, "result": result})
                                 
                                 await session.send_tool_response(function_responses=function_responses)
-                                # Gemini Live completes tool turn without audio unless prompted to generate vocal synthesis:
-                                await session.send_client_content(
-                                    turns=[types.Content(role="user", parts=[types.Part(text="Based on what you just retrieved from the tool, please give your spoken response now.")])],
-                                    turn_complete=True
-                                )
                         
                         # session.receive() iterator ended (e.g. after turn_complete) — re-enter to keep listening
                         logger.debug("Gemini receive iterator completed, re-entering receive loop")

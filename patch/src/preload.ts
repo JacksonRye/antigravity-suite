@@ -1763,6 +1763,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let isUserSpeaking = false;
     let lastVocalSpeechTime = 0;
     let speechFramesCount = 0;
+    const preRollBuffer: ArrayBuffer[] = []; // Stores recent 250ms of audio frames before speech confirmation
     const NATURAL_PAUSE_MS = 1100; // 1.1s natural pause to formulate thoughts
     let activeConvInterval: any = null;
     let pauseThinkingTimeout: any = null;
@@ -2113,14 +2114,22 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const now = Date.now();
 
+        // Prepare downsampled PCM16 frame
+        const downsampled = downsampleBuffer(input, micAudioCtx.sampleRate, 16000);
+        const pcm16 = new Int16Array(downsampled.length);
+        for (let i = 0; i < downsampled.length; i++) {
+          const s = Math.max(-1, Math.min(1, downsampled[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+
         // Detect intentional vocal speech
         if (rms > speechThreshold) {
           speechFramesCount++;
           if (speechFramesCount >= 2) { // 2 consecutive frames confirms real speech, not clicks
             lastVocalSpeechTime = now;
 
-            // Natural Vocal Barge-In: If Gemini is speaking and you speak, interrupt Gemini!
-            if (voiceState === 'speaking' || scheduledSources.length > 0) {
+            // Natural Vocal Barge-In: Only interrupt if Gemini is actively playing audio through speakers!
+            if (scheduledSources.length > 0) {
               logMsg('BARGE-IN', 'Voice barge-in detected! Silencing Gemini playback...', 'vad');
               stopAudioPlayback();
               updateUiState('listening', '🎙️ Listening to you...');
@@ -2130,21 +2139,23 @@ window.addEventListener('DOMContentLoaded', () => {
               isUserSpeaking = true;
               logMsg('VAD', `Speech detected (RMS: ${rms.toFixed(3)}, Floor: ${adaptiveNoiseFloor.toFixed(3)})`, 'vad');
               updateUiState('listening', '🎙️ Listening to you...');
+
+              // Flush pre-roll buffer so the very first syllable (e.g. "Hi") is never clipped!
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                while (preRollBuffer.length > 0) {
+                  const preChunk = preRollBuffer.shift();
+                  if (preChunk) ws.send(preChunk);
+                }
+              }
             }
           }
         } else {
           speechFramesCount = Math.max(0, speechFramesCount - 1);
         }
 
-        // Stream audio chunks while speaking or active turn
+        // Stream audio chunks while speaking or buffer into pre-roll while waiting
         if (isUserSpeaking) {
           if (ws && ws.readyState === WebSocket.OPEN) {
-            const downsampled = downsampleBuffer(input, micAudioCtx.sampleRate, 16000);
-            const pcm16 = new Int16Array(downsampled.length);
-            for (let i = 0; i < downsampled.length; i++) {
-              const s = Math.max(-1, Math.min(1, downsampled[i]));
-              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-            }
             ws.send(pcm16.buffer);
           }
 
@@ -2158,7 +2169,7 @@ window.addEventListener('DOMContentLoaded', () => {
               ws.send(silence.buffer);
             }
 
-            // Watchdog: If Gemini does not send audio or turn_complete within 2.5s, cleanly reset to listening
+            // Watchdog: If Gemini does not send audio or turn_complete within 12s, cleanly reset to listening
             if (pauseThinkingTimeout) clearTimeout(pauseThinkingTimeout);
             pauseThinkingTimeout = setTimeout(() => {
               if (scheduledSources.length === 0 && voiceState !== 'idle') {
@@ -2166,7 +2177,13 @@ window.addEventListener('DOMContentLoaded', () => {
                 updateUiState('listening', '🎙️ Listening... (Speak naturally)');
               }
               pauseThinkingTimeout = null;
-            }, 2500);
+            }, 12000);
+          }
+        } else {
+          // Keep a rolling window of recent audio (~250ms) so short first words like "Hi" are never cut off
+          preRollBuffer.push(pcm16.buffer);
+          if (preRollBuffer.length > 3) {
+            preRollBuffer.shift();
           }
         }
       };

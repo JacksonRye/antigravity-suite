@@ -159,19 +159,37 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                 )
             ),
             types.FunctionDeclaration(
-                name="write_to_chat",
-                description="Types a prompt into the Antigravity chat input box. Set submit=True if the developer explicitly said to send, run, execute, tell the agent, or submit it immediately. Set submit=False if the developer asked to type, draft, or write it without sending.",
+                name="draft_to_chat",
+                description="Types/drafts a prompt into the Antigravity chat input box WITHOUT sending it. Use this when the developer asks to draft, write, type, formulate, or prepare a message or prompt for review.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     required=["prompt"],
                     properties={
                         "prompt": types.Schema(
                             type=types.Type.STRING,
-                            description="The complete, well-formulated prompt or task instructions to write into the Antigravity chat box for the coding agent."
-                        ),
-                        "submit": types.Schema(
-                            type=types.Type.BOOLEAN,
-                            description="Whether to submit the message immediately (true) or leave it drafted in the input box for manual review (false)."
+                            description="The complete, well-formulated prompt or task instructions to type into the Antigravity chat box."
+                        )
+                    }
+                )
+            ),
+            types.FunctionDeclaration(
+                name="submit_chat",
+                description="Submits whatever message is CURRENTLY drafted in the Antigravity chat input box by clicking the send button. Takes no arguments and does NOT type or modify any text. Use when the developer says 'submit', 'send that', 'go ahead', 'run it', or confirms a drafted prompt.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={}
+                )
+            ),
+            types.FunctionDeclaration(
+                name="send_immediate_prompt",
+                description="Types a prompt into the Antigravity chat input box AND immediately submits it in one shot. Use this ONLY when the developer explicitly asks to send or execute a new command right away (e.g. 'tell the agent to run tests and send it now').",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    required=["prompt"],
+                    properties={
+                        "prompt": types.Schema(
+                            type=types.Type.STRING,
+                            description="The complete prompt to write and submit immediately."
                         )
                     }
                 )
@@ -186,6 +204,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         tools=[chat_tools],
         tool_mapping={
             "get_active_chat_context": watcher.get_active_chat_context,
+            "draft_to_chat": chat_controller.draft_to_chat,
+            "submit_chat": chat_controller.submit_chat,
+            "send_immediate_prompt": chat_controller.send_immediate_prompt,
             "write_to_chat": chat_controller.write_to_chat,
         }
     )

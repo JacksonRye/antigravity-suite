@@ -2081,10 +2081,10 @@ window.addEventListener('DOMContentLoaded', () => {
         const input = e.inputBuffer.getChannelData(0);
 
         // Acoustic Echo Cancellation / Gating:
-        // While Butler audio is physically playing or within 350ms reverb cooldown, mute mic completely
-        // so the speaker output never hits the mic and causes self-interruption!
+        // Only mute during active audio playback to prevent self-interruption from speaker bleed.
+        // A minimal 80ms cooldown allows instant speech turnaround without locking the mic.
         const isButlerAudioPlaying = scheduledSources.length > 0;
-        const inEchoCooldown = Date.now() - lastPlaybackEndTime < 350;
+        const inEchoCooldown = Date.now() - lastPlaybackEndTime < 80;
 
         if (isButlerAudioPlaying || inEchoCooldown) {
           speechFramesCount = 0;
@@ -2097,13 +2097,13 @@ window.addEventListener('DOMContentLoaded', () => {
         for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         const rms = Math.sqrt(sum / input.length);
 
-        // Dynamically adapt noise floor during ambient sounds / room music
+        // Dynamically adapt noise floor during ambient sounds
         if (!isUserSpeaking) {
           adaptiveNoiseFloor = adaptiveNoiseFloor * 0.96 + rms * 0.04;
         }
 
-        // True vocal speech threshold must rise above the music/room noise floor
-        const speechThreshold = Math.max(0.025, adaptiveNoiseFloor * 2.3);
+        // Responsive speech threshold with lower floor so gentle words trigger immediately
+        const speechThreshold = Math.max(0.018, adaptiveNoiseFloor * 1.8);
 
         // Live visual meter
         if (drawer.style.display === 'flex' && meterInner) {
@@ -2114,7 +2114,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const now = Date.now();
 
-        // Prepare downsampled PCM16 frame
+        // Prepare downsampled PCM16 frame (16kHz standard for Gemini Live)
         const downsampled = downsampleBuffer(input, micAudioCtx.sampleRate, 16000);
         const pcm16 = new Int16Array(downsampled.length);
         for (let i = 0; i < downsampled.length; i++) {
@@ -2122,69 +2122,42 @@ window.addEventListener('DOMContentLoaded', () => {
           pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
         }
 
-        // Detect intentional vocal speech
+        // Immediate speech detection: single frame is sufficient to mark speech active
         if (rms > speechThreshold) {
-          speechFramesCount++;
-          if (speechFramesCount >= 2) { // 2 consecutive frames confirms real speech, not clicks
-            lastVocalSpeechTime = now;
+          lastVocalSpeechTime = now;
 
-            // Natural Vocal Barge-In: Only interrupt if Gemini is actively playing audio through speakers!
-            if (scheduledSources.length > 0) {
-              logMsg('BARGE-IN', 'Voice barge-in detected! Silencing Gemini playback...', 'vad');
-              stopAudioPlayback();
-              updateUiState('listening', '🎙️ Listening to you...');
-            }
-
-            if (!isUserSpeaking) {
-              isUserSpeaking = true;
-              logMsg('VAD', `Speech detected (RMS: ${rms.toFixed(3)}, Floor: ${adaptiveNoiseFloor.toFixed(3)})`, 'vad');
-              updateUiState('listening', '🎙️ Listening to you...');
-
-              // Flush pre-roll buffer so the very first syllable (e.g. "Hi") is never clipped!
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                while (preRollBuffer.length > 0) {
-                  const preChunk = preRollBuffer.shift();
-                  if (preChunk) ws.send(preChunk);
-                }
-              }
-            }
+          if (!isUserSpeaking) {
+            isUserSpeaking = true;
+            logMsg('VAD', `Speech detected (RMS: ${rms.toFixed(3)}, Floor: ${adaptiveNoiseFloor.toFixed(3)})`, 'vad');
+            updateUiState('listening', '🎙️ Listening to you...');
           }
-        } else {
-          speechFramesCount = Math.max(0, speechFramesCount - 1);
         }
 
-        // Stream audio chunks while speaking or buffer into pre-roll while waiting
-        if (isUserSpeaking) {
+        // CONTINUOUS STREAMING: Always stream mic frames over WebSocket when session is open
+        // Gemini Live's native server-side neural VAD handles real-time semantic endpointing!
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(pcm16.buffer);
+        }
+
+        // Natural pause detection to update UI and send end-of-utterance prompt if user pauses
+        if (isUserSpeaking && (now - lastVocalSpeechTime > NATURAL_PAUSE_MS)) {
+          isUserSpeaking = false;
+          logMsg('TURN', `Natural pause (${NATURAL_PAUSE_MS}ms) detected. Gemini answering...`, 'info');
+          updateUiState('speaking', '⏳ Gemini thinking...');
           if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(pcm16.buffer);
+            const silence = new Int16Array(1600); // 100ms silence delimiter
+            ws.send(silence.buffer);
           }
 
-          // Natural Pause Detection: When you pause for 1.1s, notify Gemini
-          if (now - lastVocalSpeechTime > NATURAL_PAUSE_MS) {
-            isUserSpeaking = false;
-            logMsg('TURN', `Natural pause (${NATURAL_PAUSE_MS}ms) detected. Gemini answering...`, 'info');
-            updateUiState('speaking', '⏳ Gemini thinking...');
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              const silence = new Int16Array(1600); // 100ms silence frame
-              ws.send(silence.buffer);
+          // Watchdog: If Gemini does not send audio or turn_complete within 12s, cleanly reset to listening
+          if (pauseThinkingTimeout) clearTimeout(pauseThinkingTimeout);
+          pauseThinkingTimeout = setTimeout(() => {
+            if (scheduledSources.length === 0 && voiceState !== 'idle') {
+              logMsg('TIMEOUT', 'No response needed or Gemini finished turn. Ready for next query.', 'info');
+              updateUiState('listening', '🎙️ Listening... (Speak naturally)');
             }
-
-            // Watchdog: If Gemini does not send audio or turn_complete within 12s, cleanly reset to listening
-            if (pauseThinkingTimeout) clearTimeout(pauseThinkingTimeout);
-            pauseThinkingTimeout = setTimeout(() => {
-              if (scheduledSources.length === 0 && voiceState !== 'idle') {
-                logMsg('TIMEOUT', 'No response needed or Gemini finished turn. Ready for next query.', 'info');
-                updateUiState('listening', '🎙️ Listening... (Speak naturally)');
-              }
-              pauseThinkingTimeout = null;
-            }, 12000);
-          }
-        } else {
-          // Keep a rolling window of recent audio (~250ms) so short first words like "Hi" are never cut off
-          preRollBuffer.push(pcm16.buffer);
-          if (preRollBuffer.length > 3) {
-            preRollBuffer.shift();
-          }
+            pauseThinkingTimeout = null;
+          }, 12000);
         }
       };
 

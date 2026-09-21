@@ -1428,7 +1428,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Internal Logging
     const rawLogs: string[] = [];
-    function logMsg(category: string, text: string, level: 'info' | 'mic' | 'ws' | 'vad' | 'error' | 'success' | 'model' | 'warn' = 'info') {
+    function logMsg(category: string, text: string, level: 'info' | 'mic' | 'ws' | 'vad' | 'error' | 'success' | 'model' | 'warn' = 'info', isHtml: boolean = false) {
       const d = new Date();
       const ts = d.toTimeString().split(' ')[0] + '.' + String(d.getMilliseconds()).padStart(3, '0');
       const cleanLine = `[${ts}] [${category}] ${text}`;
@@ -1438,7 +1438,8 @@ window.addEventListener('DOMContentLoaded', () => {
       if (logsWindow) {
         const line = document.createElement('div');
         line.className = 'agy-log-line';
-        line.innerHTML = `<span class="agy-log-ts">[${ts}]</span> <span class="agy-tag-${level}">[${category}]</span> <span>${escapeHtml(text)}</span>`;
+        const formattedContent = isHtml ? text : escapeHtml(text);
+        line.innerHTML = `<span class="agy-log-ts">[${ts}]</span> <span class="agy-tag-${level}">[${category}]</span> <span>${formattedContent}</span>`;
         logsWindow.appendChild(line);
         logsWindow.scrollTop = logsWindow.scrollHeight;
       }
@@ -1974,6 +1975,33 @@ window.addEventListener('DOMContentLoaded', () => {
                   renderTranscriptLine('User', msg.text);
                 } else if ((msg.type === 'model' || msg.type === 'gemini') && msg.text) {
                   renderTranscriptLine('Gemini', msg.text);
+                } else if (msg.type === 'tool_call') {
+                  if (msg.name === 'search_web') {
+                    const query = msg.args?.query || '';
+                    const results = msg.result?.results || [];
+                    let cardHtml = `<strong>🔍 Web Search:</strong> <em>"${escapeHtml(query)}"</em><br/>`;
+                    if (results.length > 0) {
+                      cardHtml += `<div style="margin-top:4px;padding-left:8px;border-left:2px solid #38bdf8;">`;
+                      results.forEach((r: any, idx: number) => {
+                        const title = escapeHtml(r.title || 'Source');
+                        const url = escapeHtml(r.url || '#');
+                        const snippet = escapeHtml((r.snippet || '').slice(0, 140));
+                        cardHtml += `<div style="margin-bottom:4px;">${idx + 1}. <a href="${url}" target="_blank" style="color:#38bdf8;text-decoration:underline;">${title}</a><br/><span style="color:#94a3b8;font-size:10px;">${snippet}...</span></div>`;
+                      });
+                      cardHtml += `</div>`;
+                    } else {
+                      cardHtml += `<span style="color:#94a3b8;">No results found.</span>`;
+                    }
+                    logMsg('RESEARCH', cardHtml, 'model', true);
+                  } else if (msg.name === 'read_url_content') {
+                    const title = escapeHtml(msg.result?.title || msg.args?.url || 'Web Page');
+                    const url = escapeHtml(msg.args?.url || '#');
+                    const snippet = escapeHtml((msg.result?.content || '').slice(0, 200));
+                    const cardHtml = `<strong>📄 Read Page:</strong> <a href="${url}" target="_blank" style="color:#38bdf8;text-decoration:underline;">${title}</a><br/><span style="color:#94a3b8;font-size:10px;">${snippet}...</span>`;
+                    logMsg('RESEARCH', cardHtml, 'model', true);
+                  } else {
+                    logMsg('TOOL', `Called ${msg.name}: ${JSON.stringify(msg.args || {})}`, 'info');
+                  }
                 } else if (msg.type === 'error') {
                   logMsg('ERROR', `Server reported error: ${msg.error}`, 'error');
                   updateUiState('error', msg.error);

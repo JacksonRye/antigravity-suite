@@ -1789,13 +1789,16 @@ window.addEventListener('DOMContentLoaded', () => {
       return playbackAudioCtx;
     }
 
+    let audioChunkQueue: Float32Array[] = [];
+    let isFlushingAudioQueue = false;
+    let playbackChunkTimeout: any = null;
+
     function playAudioChunk(arrayBuffer: ArrayBuffer) {
       try {
         if (pauseThinkingTimeout) {
           clearTimeout(pauseThinkingTimeout);
           pauseThinkingTimeout = null;
         }
-        const ctx = getPlaybackContext();
         const pcmData = new Int16Array(arrayBuffer);
         if (pcmData.length === 0) return;
 
@@ -1804,6 +1807,43 @@ window.addEventListener('DOMContentLoaded', () => {
           float32Data[i] = pcmData[i] / 32768.0;
         }
 
+        audioChunkQueue.push(float32Data);
+        scheduleAudioPlayback();
+      } catch (err: any) {
+        logMsg('AUDIO', 'Playback error: ' + err.message, 'error');
+      }
+    }
+
+    function scheduleAudioPlayback() {
+      const ctx = getPlaybackContext();
+      const now = ctx.currentTime;
+
+      // If scheduledSources is empty, this is a fresh utterance.
+      // Wait for a 150ms buffer (or 3 chunks) before starting to eliminate network arrival jitter.
+      if (scheduledSources.length === 0 && nextStartTime <= now) {
+        let totalSamples = 0;
+        for (const c of audioChunkQueue) totalSamples += c.length;
+        const bufferedMs = (totalSamples / 24000) * 1000;
+
+        if (bufferedMs < 120 && audioChunkQueue.length < 3) {
+          if (!playbackChunkTimeout) {
+            playbackChunkTimeout = setTimeout(() => {
+              playbackChunkTimeout = null;
+              scheduleAudioPlayback();
+            }, 40);
+          }
+          return;
+        }
+      }
+
+      if (playbackChunkTimeout) {
+        clearTimeout(playbackChunkTimeout);
+        playbackChunkTimeout = null;
+      }
+
+      // Schedule all queued chunks seamlessly back-to-back
+      while (audioChunkQueue.length > 0) {
+        const float32Data = audioChunkQueue.shift()!;
         const buffer = ctx.createBuffer(1, float32Data.length, 24000);
         buffer.getChannelData(0).set(float32Data);
 
@@ -1811,19 +1851,20 @@ window.addEventListener('DOMContentLoaded', () => {
         source.buffer = buffer;
         source.connect(ctx.destination);
 
-        const now = ctx.currentTime;
-        // Jitter buffer: add 40ms initial lead time on new utterances to avoid micro-gaps/cracking
-        if (nextStartTime < now) {
-          nextStartTime = now + 0.04;
+        const currentTime = ctx.currentTime;
+        if (nextStartTime < currentTime) {
+          // If playback fell behind, start slightly in the future (100ms safety window)
+          nextStartTime = currentTime + 0.10;
         }
+
         source.start(nextStartTime);
         nextStartTime += buffer.duration;
-
         scheduledSources.push(source);
+
         source.onended = () => {
           const idx = scheduledSources.indexOf(source);
           if (idx > -1) scheduledSources.splice(idx, 1);
-          if (scheduledSources.length === 0) {
+          if (scheduledSources.length === 0 && audioChunkQueue.length === 0) {
             lastPlaybackEndTime = Date.now();
             if (voiceState === 'speaking' && !isUserSpeaking) {
               updateUiState('listening', '🎙️ Listening... (Speak naturally anytime)');
@@ -1831,16 +1872,19 @@ window.addEventListener('DOMContentLoaded', () => {
             }
           }
         };
+      }
 
-        if (voiceState !== 'speaking' && !isUserSpeaking) {
-          updateUiState('speaking', '🔊 Gemini speaking... (Speak to interrupt or Esc)');
-        }
-      } catch (err: any) {
-        logMsg('AUDIO', 'Playback error: ' + err.message, 'error');
+      if (voiceState !== 'speaking' && !isUserSpeaking) {
+        updateUiState('speaking', '🔊 Gemini speaking... (Speak to interrupt or Esc)');
       }
     }
 
     function stopAudioPlayback() {
+      if (playbackChunkTimeout) {
+        clearTimeout(playbackChunkTimeout);
+        playbackChunkTimeout = null;
+      }
+      audioChunkQueue = [];
       for (const s of scheduledSources) {
         try {
           s.stop();

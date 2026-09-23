@@ -2002,6 +2002,13 @@ window.addEventListener('DOMContentLoaded', () => {
                   } else {
                     logMsg('TOOL', `Called ${msg.name}: ${JSON.stringify(msg.args || {})}`, 'info');
                   }
+                } else if (msg.type === 'session_reconnecting') {
+                  logMsg('WS', `Backend refreshing Gemini Live session: ${msg.error || ''}`, 'ws');
+                  updateUiState('listening', '🔄 Resuming Gemini Live...');
+                } else if (msg.type === 'interrupted') {
+                  logMsg('INTERRUPT', 'Gemini Live detected user speech interrupt.', 'vad');
+                  stopAudioPlayback();
+                  updateUiState('listening', '🎙️ Listening to you...');
                 } else if (msg.type === 'error') {
                   logMsg('ERROR', `Server reported error: ${msg.error}`, 'error');
                   updateUiState('error', msg.error);
@@ -2064,14 +2071,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
           ws.onerror = (err: any) => {
             logMsg('WS', 'WebSocket error: ' + (err?.message || 'Check if service is running on port 8000'), 'error');
-            updateUiState('error', 'Connection failed');
-            toggleDrawer(true);
           };
 
           ws.onclose = (e) => {
-            logMsg('WS', `Connection closed (code: ${e.code}, reason: "${e.reason}")`, 'info');
-            if (voiceState !== 'error') {
-              stopVoiceSession();
+            logMsg('WS', `Connection closed (code: ${e.code}, reason: "${e.reason || 'none'}"). Auto-reconnecting...`, 'info');
+            // Auto-reconnect failsafe if session was actively in progress
+            if (voiceState !== 'idle' && voiceState !== 'error') {
+              updateUiState('connecting', '🔄 Reconnecting to Gemini Live...');
+              setTimeout(() => {
+                if (voiceState !== 'idle') {
+                  void startVoiceSession();
+                }
+              }, 1500);
             }
           };
         } else {
@@ -2117,25 +2128,15 @@ window.addEventListener('DOMContentLoaded', () => {
       micProcessor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
 
-        // Acoustic Echo Cancellation / Gating:
-        // Only mute during active audio playback to prevent self-interruption from speaker bleed.
-        // A minimal 80ms cooldown allows instant speech turnaround without locking the mic.
-        const isButlerAudioPlaying = scheduledSources.length > 0;
-        const inEchoCooldown = Date.now() - lastPlaybackEndTime < 80;
-
-        if (isButlerAudioPlaying || inEchoCooldown) {
-          speechFramesCount = 0;
-          isUserSpeaking = false;
-          return;
-        }
-
         // RMS of vocal bandpass filtered audio
         let sum = 0;
         for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         const rms = Math.sqrt(sum / input.length);
 
-        // Dynamically adapt noise floor during ambient sounds
-        if (!isUserSpeaking) {
+        const isButlerAudioPlaying = scheduledSources.length > 0;
+
+        // Dynamically adapt noise floor during ambient sounds when Butler is NOT speaking
+        if (!isUserSpeaking && !isButlerAudioPlaying) {
           adaptiveNoiseFloor = adaptiveNoiseFloor * 0.96 + rms * 0.04;
         }
 
@@ -2150,6 +2151,26 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         const now = Date.now();
+
+        // ─── BARGE-IN / INTERRUPTION HANDLING ───
+        // If Gemini is currently speaking and user starts talking louder than background bleed:
+        if (isButlerAudioPlaying) {
+          const bargeInThreshold = Math.max(0.040, speechThreshold * 1.4);
+          if (rms > bargeInThreshold) {
+            logMsg('INTERRUPT', `Barge-in vocal interrupt detected (RMS: ${rms.toFixed(3)})! Stopping playback.`, 'vad');
+            stopAudioPlayback();
+            isUserSpeaking = true;
+            lastVocalSpeechTime = now;
+            updateUiState('listening', '🎙️ Listening to you...');
+            // Notify server of interrupt immediately
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'interrupt' }));
+            }
+          } else {
+            // Speaker bleed protection: don't stream speaker audio back to Gemini
+            return;
+          }
+        }
 
         // Prepare downsampled PCM16 frame (16kHz standard for Gemini Live)
         const downsampled = downsampleBuffer(input, micAudioCtx.sampleRate, 16000);
@@ -2186,15 +2207,15 @@ window.addEventListener('DOMContentLoaded', () => {
             ws.send(silence.buffer);
           }
 
-          // Watchdog: If Gemini does not send audio or turn_complete within 12s, cleanly reset to listening
+          // Watchdog: If Gemini does not send audio or turn_complete within 8s, cleanly reset to listening
           if (pauseThinkingTimeout) clearTimeout(pauseThinkingTimeout);
           pauseThinkingTimeout = setTimeout(() => {
             if (scheduledSources.length === 0 && voiceState !== 'idle') {
-              logMsg('TIMEOUT', 'No response needed or Gemini finished turn. Ready for next query.', 'info');
+              logMsg('TIMEOUT', 'Response timeout recovered. Resetting to active listening.', 'warn');
               updateUiState('listening', '🎙️ Listening... (Speak naturally)');
             }
             pauseThinkingTimeout = null;
-          }, 12000);
+          }, 8000);
         }
       };
 

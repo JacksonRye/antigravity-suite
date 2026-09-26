@@ -388,6 +388,11 @@ function handleCustomModelRequest(
   isStream: boolean,
   retryCount = 0,
 ): void {
+  if (res.writableEnded) {
+    log.warn(`[Proxy] Aborting custom model request for ${model.name}: client response already ended.`);
+    return;
+  }
+
   // P3-18: Configurable max retries per model (default 3, min 0, max 5)
   const MAX_RETRIES = Math.min(Math.max(model.maxRetries ?? 3, 0), 5);
   const REQUEST_TIMEOUT_MS = model.timeout || 120_000;
@@ -499,10 +504,10 @@ function handleCustomModelRequest(
   const request = client.request(url, options, (apiRes) => {
     apiRes.on('error', (err) => {
       log.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
-      if (!res.headersSent) {
+      if (!res.headersSent && !res.writableEnded) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: { message: 'Upstream connection error: ' + err.message } }));
-      } else {
+      } else if (!res.writableEnded) {
         res.end();
       }
     });
@@ -575,12 +580,14 @@ function handleCustomModelRequest(
         return;
       }
 
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
+      if (!res.headersSent && !res.writableEnded) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+      }
 
       let buffer = '';
       apiRes.on('data', (chunk: Buffer) => {
@@ -725,8 +732,12 @@ function handleCustomModelRequest(
             metadata: {},
           };
 
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(cloudCodeResponse));
+          if (!res.headersSent && !res.writableEnded) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(cloudCodeResponse));
+          } else if (!res.writableEnded) {
+            res.end();
+          }
         } catch (e) {
           log.error('[Proxy] Failed to map response:', e);
 
@@ -739,14 +750,20 @@ function handleCustomModelRequest(
             return;
           }
 
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: { message: 'Failed to translate model response' } }));
+          if (!res.headersSent && !res.writableEnded) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: 'Failed to translate model response' } }));
+          } else if (!res.writableEnded) {
+            res.end();
+          }
         }
       });
     }
   });
 
+  let hasTimedOut = false;
   request.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    hasTimedOut = true;
     log.error(`[Proxy] Request timeout (${REQUEST_TIMEOUT_MS}ms) for ${model.name}`);
     request.destroy();
 
@@ -759,13 +776,17 @@ function handleCustomModelRequest(
       return;
     }
 
-    if (!res.headersSent) {
+    if (!res.headersSent && !res.writableEnded) {
       res.writeHead(504, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: { message: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000}s` } }));
+    } else if (!res.writableEnded) {
+      res.end();
     }
   });
 
   request.on('error', (err) => {
+    if (hasTimedOut) return;
+
     log.error('[Proxy] Custom Model Request Error:', err);
 
     if (retryCount < MAX_RETRIES) {
@@ -778,7 +799,7 @@ function handleCustomModelRequest(
     }
 
     if (isStream) {
-      if (!res.headersSent) {
+      if (!res.headersSent && !res.writableEnded) {
         const errResponse = {
           response: {
             candidates: [
@@ -792,13 +813,23 @@ function handleCustomModelRequest(
           traceId: '',
           metadata: {},
         };
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
         res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
       }
-      res.end();
+      if (!res.writableEnded) {
+        res.end();
+      }
     } else {
-      if (!res.headersSent) {
+      if (!res.headersSent && !res.writableEnded) {
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: { message: 'Custom model request failed: ' + err.message } }));
+      } else if (!res.writableEnded) {
+        res.end();
       }
     }
   });

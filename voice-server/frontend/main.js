@@ -41,11 +41,9 @@ const geminiClient = new GeminiClient({
       console.warn("Could not auto-start mic:", e);
     }
 
-    // Send hidden instruction
+    // Send greeting trigger
     geminiClient.sendText(
-      `System: Introduce yourself as a demo of the Gemini Live API.
-       Suggest playing with features like the native audio for accents and multilingual support.
-       Keep the intro concise and friendly.`
+      `System: Introduce yourself briefly as the AI Pair-Programming Voice Butler. Keep it to one crisp sentence.`
     );
   },
   onMessage: (event) => {

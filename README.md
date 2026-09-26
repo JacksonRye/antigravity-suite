@@ -28,5 +28,20 @@ cd ~/antigravity-suite
 - Closes any running Antigravity instance.
 - Compiles the TypeScript proxy and injects it into `/Applications/Antigravity.app`.
 - Sets up the Python virtual environment and dependencies for the real-time voice engine.
-- Configures macOS auto-start for the voice service on login.
+- Sets up the native macOS `launchd` background daemon for the voice service on port 8000.
+- Automatically syncs your Gemini API key from `~/.gemini/agent_platform.env`.
 - Launches Antigravity with all models and live voice ready to use.
+
+---
+
+## 🔄 Updating Google Antigravity & Re-Applying Patches
+
+When Google releases a new update to Antigravity:
+1. Update or install the latest **Antigravity.app**.
+2. Run the 1-command installer in your terminal:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/JacksonRye/antigravity-suite/main/setup.sh | bash
+   ```
+   *(Or if you already have the repository cloned: `cd ~/antigravity-suite && git pull && ./install.sh`)*
+
+The script will automatically re-compile and inject all patches (custom models, memory manager, tab-switching continuation, tool announcements, and live voice butler) back into the fresh application bundle.

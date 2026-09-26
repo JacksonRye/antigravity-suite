@@ -57,28 +57,62 @@ if [ ! -d ".venv" ]; then
     fi
 fi
 
-# 7. Configure Login Item / Startup
-echo "[4/4] Starting voice backend and launching Antigravity..."
-cat << 'LAUNCHER' > "$HOME/start_gemini_voice.sh"
-#!/usr/bin/env bash
-VOICE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/antigravity-suite/voice-server"
-if [ ! -d "$VOICE_DIR" ]; then
-    VOICE_DIR="$HOME/antigravity-unified/voice-server"
-fi
-if [ -d "$VOICE_DIR" ]; then
-    cd "$VOICE_DIR"
-    nohup .venv/bin/uvicorn main:app --port 8000 --host 0.0.0.0 > uvicorn.log 2>&1 &
-fi
-LAUNCHER
-chmod +x "$HOME/start_gemini_voice.sh"
+# 7. Configure launchd LaunchAgent for Voice Server
+echo "[4/4] Configuring background voice daemon and launching Antigravity..."
+PLIST_PATH="$HOME/Library/LaunchAgents/com.antigravity.gemini-live-server.plist"
 
-# Add to macOS login items
-osascript -e 'tell application "System Events" to make login item at end with properties {path:"'"$HOME"'/start_gemini_voice.sh", hidden:true}' 2>/dev/null || true
+# Sync API key from master environment if available
+if [ -f "$HOME/.gemini/agent_platform.env" ]; then
+    echo "Found master agent_platform.env, syncing keys..."
+    MASTER_KEY=$(grep "GEMINI_API_KEY=" "$HOME/.gemini/agent_platform.env" | cut -d '=' -f2- || true)
+    if [ -n "$MASTER_KEY" ]; then
+        sed -i '' "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=${MASTER_KEY}|" "$VOICE_DIR/.env" 2>/dev/null || true
+    fi
+fi
 
-# Start voice daemon now
+# Stop any running instances
+launchctl bootout "gui/$(id -u)/com.antigravity.gemini-live-server" 2>/dev/null || true
 lsof -ti :8000 | xargs kill -9 2>/dev/null || true
-cd "$VOICE_DIR"
-nohup .venv/bin/uvicorn main:app --port 8000 --host 0.0.0.0 > uvicorn.log 2>&1 &
+
+cat << PLIST > "$PLIST_PATH"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.antigravity.gemini-live-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$VOICE_DIR/.venv/bin/python3</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$VOICE_DIR</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$VOICE_DIR/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>$VOICE_DIR/server.error.log</string>
+</dict>
+</plist>
+PLIST
+
+# Load launchd service
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || launchctl load -w "$PLIST_PATH" 2>/dev/null || true
 sleep 2
 
 # Launch Antigravity

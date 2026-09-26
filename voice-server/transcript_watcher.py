@@ -43,6 +43,14 @@ class TranscriptWatcher:
         self.last_user_input_time = ""
         self.is_running = False
         self.pending_speech_task = None
+        # Per-chat state map: {conv_id: {"last_pos": int, "last_spoken_step": int, "last_user_input_time": str}}
+        self.conv_states = {}
+        # Speech state and interruption management
+        self.is_speaking = False
+        self.current_speaking_summary = ""
+        self.current_title = ""
+        self.interrupted_summaries = {}  # {conv_id: {"text": str, "title": str}}
+        self.last_interrupted_conv_id = None
 
     def get_brain_dir(self):
         return os.path.expanduser("~/.gemini/antigravity/brain")
@@ -114,7 +122,7 @@ class TranscriptWatcher:
                         extracted.append({
                             "speaker": "Developer",
                             "step": step,
-                            "summary": clean[:1000]
+                            "summary": clean[:2500]
                         })
                     elif source == "MODEL" and t_type == "PLANNER_RESPONSE" and content:
                         clean = re.sub(r"```[\s\S]*?```", "[code snippet]", content)
@@ -124,17 +132,19 @@ class TranscriptWatcher:
                         extracted.append({
                             "speaker": "Antigravity",
                             "step": step,
-                            "summary": clean[:1000]
+                            "summary": clean[:2500]
                         })
                     elif d.get("tool_calls"):
-                        # Capture tool actions taken during coding
+                        # Capture tool actions taken during coding with rich descriptions
                         tool_summaries = []
                         for tc in d.get("tool_calls", []):
                             tc_name = tc.get("name")
                             tc_args = tc.get("args", {})
-                            summary = tc_args.get("toolSummary") or tc_args.get("Description") or ""
+                            summary = tc_args.get("Instruction") or tc_args.get("toolSummary") or tc_args.get("Description") or ""
                             target = tc_args.get("TargetFile") or tc_args.get("CommandLine") or tc_args.get("AbsolutePath") or ""
-                            if summary:
+                            if summary and target:
+                                tool_summaries.append(f"{tc_name} ({target}): {summary}")
+                            elif summary:
                                 tool_summaries.append(f"{tc_name}: {summary}")
                             elif target:
                                 tool_summaries.append(f"{tc_name}: {target}")
@@ -145,7 +155,7 @@ class TranscriptWatcher:
                             extracted.append({
                                 "speaker": "Tool Actions",
                                 "step": step,
-                                "summary": joined[:1000]
+                                "summary": joined[:2500]
                             })
 
                     if len(extracted) >= max(1, min(turns_back, 100)):
@@ -212,8 +222,8 @@ class TranscriptWatcher:
                     for tc in d.get("tool_calls", []):
                         name = tc.get("name")
                         args = tc.get("args", {})
-                        summary = args.get("toolSummary") or args.get("Description") or ""
-                        summary = summary.strip("\"'")
+                        instruction = args.get("Instruction") or args.get("Description") or args.get("toolSummary") or ""
+                        instruction = str(instruction).strip("\"'")
                         target = args.get("TargetFile") or args.get("CommandLine") or args.get("AbsolutePath") or ""
                         target = str(target).strip("\"'")
 
@@ -221,22 +231,66 @@ class TranscriptWatcher:
                             fname = target.split("/")[-1] if "/" in target else target
                             if fname:
                                 files_touched.add(fname)
-                            actions.append(f"Modified file {fname}: {summary}" if summary else f"Modified file {fname}")
+                            actions.append(f"Modified {fname}: {instruction}" if instruction else f"Modified {fname}")
                         elif name == "run_command":
-                            cmd_short = target[:60]
-                            actions.append(f"Command '{cmd_short}': {summary}" if summary else f"Ran: {cmd_short}")
+                            cmd_short = target[:80]
+                            cmd_desc = args.get("toolSummary") or args.get("toolAction") or instruction
+                            actions.append(f"Command '{cmd_short}': {cmd_desc}" if cmd_desc else f"Ran: {cmd_short}")
                 except Exception:
                     pass
 
             actions.reverse()
+
+            # Attempt to ingest walkthrough.md if generated or updated in this conversation
+            walkthrough_summary = ""
+            try:
+                conv_dir = os.path.dirname(os.path.dirname(os.path.dirname(path)))
+                wt_path = os.path.join(conv_dir, "walkthrough.md")
+                if os.path.exists(wt_path):
+                    with open(wt_path, "r", encoding="utf-8", errors="ignore") as wf:
+                        raw_wt = wf.read()
+                        clean_wt = re.sub(r"```[\s\S]*?```", "[code block]", raw_wt)
+                        walkthrough_summary = clean_wt[:3000].strip()
+            except Exception:
+                pass
+
             return {
-                "user_goal": user_goal[:500],
-                "actions": actions[-8:],
-                "files_touched": list(files_touched)
+                "user_goal": user_goal[:1000],
+                "actions": actions[-25:],
+                "files_touched": list(files_touched),
+                "walkthrough": walkthrough_summary
             }
         except Exception as e:
             logger.error(f"Error extracting execution context: {e}")
-            return {"user_goal": "", "actions": [], "files_touched": []}
+            return {"user_goal": "", "actions": [], "files_touched": [], "walkthrough": ""}
+
+    def get_conversation_title(self, conv_id: str) -> str:
+        """Derives a human-readable title for a conversation by checking its initial user prompt."""
+        if not conv_id:
+            return ""
+        candidate = os.path.join(self.get_brain_dir(), conv_id, ".system_generated", "logs", "transcript.jsonl")
+        if not os.path.exists(candidate):
+            return ""
+        try:
+            with open(candidate, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    d = json.loads(line)
+                    if d.get("source") == "USER_EXPLICIT" or d.get("type") == "USER_INPUT":
+                        raw = d.get("content") or ""
+                        req_match = re.search(r"<USER_REQUEST>(.*?)</USER_REQUEST>", raw, re.DOTALL)
+                        text = req_match.group(1).strip() if req_match else raw.strip()
+                        lines_txt = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("/")]
+                        if lines_txt:
+                            first_line = lines_txt[0]
+                            first_line = re.sub(r"[#*`_]+", "", first_line).strip()
+                            if len(first_line) > 50:
+                                return first_line[:47] + "..."
+                            return first_line
+        except Exception:
+            pass
+        return ""
 
     def get_latest_user_input_timestamp(self, path):
         try:
@@ -280,16 +334,16 @@ class TranscriptWatcher:
             return None
         return None
 
-    def set_active_conversation(self, conversation_id: str, force: bool = False):
+    def set_active_conversation(self, conversation_id: str, title: str = "", force: bool = False):
         if not conversation_id:
             return
         if not force and conversation_id == self.pinned_conversation_id and self.current_path and os.path.exists(self.current_path):
             return
         candidate = os.path.join(self.get_brain_dir(), conversation_id, ".system_generated", "logs", "transcript.jsonl")
         if os.path.exists(candidate):
-            logger.info(f"UI pinned active conversation: {conversation_id}")
+            logger.info(f"UI pinned active conversation: {conversation_id} ({title})")
             self.pinned_conversation_id = conversation_id
-            self.switch_to_conversation(candidate, conversation_id)
+            self.switch_to_conversation(candidate, conversation_id, title=title)
 
     def find_active_conversation(self):
         # 1. Primary Authority: Pinned conversation from UI/client
@@ -323,45 +377,129 @@ class TranscriptWatcher:
     def find_latest_transcript(self):
         return self.find_active_conversation()
 
-    def switch_to_conversation(self, path, conv_id=None):
+    def switch_to_conversation(self, path, conv_id=None, title: str = ""):
         if not path or not os.path.exists(path):
             return
+
+        target_conv_id = conv_id or path.split(os.sep)[-4]
+        target_title = title.strip() or self.get_conversation_title(target_conv_id) or "another conversation"
+
+        # Check if Butler was actively speaking when tab switch occurred
+        was_speaking = self.is_speaking
+        if was_speaking:
+            # Stop audio playback and cancel ongoing speech task
+            self.stop_current_playback()
+            self.is_speaking = False
+            # Save interrupted explanation to memory so developer can ask to resume
+            if self.pinned_conversation_id:
+                self.interrupted_summaries[self.pinned_conversation_id] = {
+                    "text": self.current_speaking_summary,
+                    "title": self.current_title or "the previous chat",
+                }
+                self.last_interrupted_conv_id = self.pinned_conversation_id
+                logger.info(f"Butler interrupted mid-speech on tab switch. Saved interrupted summary for conv '{self.pinned_conversation_id}' ('{self.current_title}').")
+
+            # Verbal announcement: announce the conversation switch out loud
+            announcement = (
+                f"[SYSTEM EVENT: Tab switched while you were speaking. "
+                f"Immediately say out loud clearly: \"We've switched to {target_title}.\" "
+                "Do not add any extra chatter; just state this one sentence out loud and pause.]"
+            )
+            if self.on_agent_turn_completed:
+                try:
+                    res = self.on_agent_turn_completed(announcement)
+                    if asyncio.iscoroutine(res):
+                        asyncio.create_task(res)
+                except Exception as e:
+                    logger.error(f"Error broadcasting switch announcement: {e}")
+
+        # 1. Save prior conversation state if leaving one
+        if self.pinned_conversation_id and self.current_path:
+            self.conv_states[self.pinned_conversation_id] = {
+                "last_pos": self.last_pos,
+                "last_spoken_step": self.last_spoken_step,
+                "last_user_input_time": self.last_user_input_time,
+                "title": self.current_title,
+            }
+
         self.current_path = path
-        self.pinned_conversation_id = conv_id or path.split(os.sep)[-4]
-        self.last_pos = os.path.getsize(path)
-        self.last_user_input_time = self.get_latest_user_input_timestamp(path)
+        self.pinned_conversation_id = target_conv_id
+        self.current_title = target_title
 
-        # Silently align last_spoken_step with the end of the file so historical responses are never spoken
-        highest_step = -1
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                        step = d.get("step_index")
-                        if step is not None and step > highest_step:
-                            highest_step = step
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # 2. Restore state if we've already tracked this conversation, otherwise initialize at end of file
+        if target_conv_id in self.conv_states:
+            saved = self.conv_states[target_conv_id]
+            self.last_pos = min(saved.get("last_pos", 0), os.path.getsize(path))
+            self.last_spoken_step = saved.get("last_spoken_step", -1)
+            self.last_user_input_time = saved.get("last_user_input_time", "")
+            logger.info(f"Restored per-chat Butler state for {target_conv_id}: last_spoken_step={self.last_spoken_step}, last_pos={self.last_pos}")
+        else:
+            self.last_pos = os.path.getsize(path)
+            self.last_user_input_time = self.get_latest_user_input_timestamp(path)
 
-        self.last_spoken_step = highest_step
-        logger.info(f"Pivoted Butler tracking to active chat {self.pinned_conversation_id} (silently aligned at step {highest_step})")
+            # Silently align last_spoken_step with the end of the file so historical responses are never spoken
+            highest_step = -1
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            d = json.loads(line)
+                            step = d.get("step_index")
+                            if step is not None and step > highest_step:
+                                highest_step = step
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
-        # Notify Gemini Live of the newly focused conversation's rolling context
+            self.last_spoken_step = highest_step
+            self.conv_states[target_conv_id] = {
+                "last_pos": self.last_pos,
+                "last_spoken_step": self.last_spoken_step,
+                "last_user_input_time": self.last_user_input_time,
+                "title": self.current_title,
+            }
+            logger.info(f"Initialized per-chat Butler state for {target_conv_id} (silently aligned at step {highest_step})")
+
+        # Notify Gemini Live of the newly focused conversation's rolling context and any interrupted context
         summary = self.get_rolling_summary(path, max_turns=5)
-        if summary and self.on_context_update:
+        if self.on_context_update:
+            interrupted_block = ""
+            # Check if this target tab itself has pending interrupted speech
+            if target_conv_id in self.interrupted_summaries:
+                my_interrupted = self.interrupted_summaries[target_conv_id]
+                interrupted_text = my_interrupted.get("text", "")
+                interrupted_block = (
+                    f"\n[INTERRUPTED EXPLANATION MEMORY (CURRENT TAB): In this conversation ('{target_title}'), you were interrupted while explaining:\n"
+                    f"\"{interrupted_text}\"\n"
+                    "Because the developer is now BACK on this original tab, if the developer asks you to continue, says 'continue', 'what were you saying?', or asks to resume, "
+                    "begin your spoken response with: 'As I was saying,' and seamlessly continue explaining the remaining portion without restarting from the beginning.]\n"
+                )
+            elif self.last_interrupted_conv_id and self.last_interrupted_conv_id != target_conv_id:
+                # Interrupted on a DIFFERENT tab
+                other_info = self.interrupted_summaries.get(self.last_interrupted_conv_id, {})
+                other_title = other_info.get("title", "our previous chat")
+                other_text = other_info.get("text", "")
+                interrupted_block = (
+                    f"\n[CROSS-TAB CONTINUATION DIRECTIVE: Notice that you were previously explaining something in '{other_title}':\n"
+                    f"\"{other_text[:500]}\"\n"
+                    f"However, the developer is currently on a DIFFERENT tab: '{target_title}'.\n"
+                    "If the developer asks you to 'continue', 'what were you saying?', or asks to resume while viewing this different tab: "
+                    f"DO NOT continue reciting the explanation from '{other_title}'!\n"
+                    f"Instead, politely acknowledge both and ask which one they'd like to discuss by saying aloud:\n"
+                    f"\"In our {other_title} chat, I was explaining [topic in 3-5 words]. But over here in {target_title}, we are working on [current chat topic in 3-5 words]. Which would you like me to discuss?\"\n"
+                    "Then pause and wait for the developer's answer.]\n"
+                )
+
             context_msg = (
-                f"[SYSTEM CONTEXT: The developer is now viewing active conversation '{self.pinned_conversation_id}'. "
-                "Any previous conversation context is now outdated and should be disregarded. "
-                f"Here is the recent on-screen chat history for this active conversation:\n{summary}\n"
-                "You are the Voice Butler. You have full visibility into this chat. "
-                "When the developer speaks, answer questions based ONLY on this current active conversation. "
-                "Stay silent and do not speak until the developer speaks to you.]"
+                f"[SYSTEM CONTEXT: The developer has switched active focus to chat '{target_title}' (id: {self.pinned_conversation_id}).\n"
+                f"Here is the recent on-screen chat history and context for this active tab:\n{summary}\n"
+                f"{interrupted_block}"
+                "Keep our ongoing verbal dialogue active and seamlessly pivot to discuss this chat when the developer speaks to you. "
+                "Stay silent and do not speak out loud until the developer speaks to you.]"
             )
             try:
                 res = self.on_context_update(context_msg)
@@ -504,7 +642,7 @@ class TranscriptWatcher:
                                     pending_response = content
                                     pending_step = step
                                     settle_timer = time.time()
-                                    logger.info(f"Queued latest response at step {step} (waiting 500ms settlement)...")
+                                    logger.info(f"Queued latest response at step {step} (waiting 0.5s conversational settlement)...")
 
                             # If model made tool calls or generic step, hold speech
                             elif d.get("tool_calls") or (d.get("source") == "MODEL" and d.get("type") == "GENERIC"):
@@ -515,7 +653,7 @@ class TranscriptWatcher:
                         except Exception as err:
                             logger.debug(f"Error parsing line: {err}")
 
-                # If candidate response settled for 500ms, speak only this final response
+                # If candidate response settled for ~0.5s to restore crisp responsiveness
                 if pending_response is not None and (time.time() - settle_timer >= 0.5):
                     to_speak = pending_response
                     step_to_speak = pending_step
@@ -524,24 +662,36 @@ class TranscriptWatcher:
                     logger.info(f"Response settled at step {step_to_speak}. Triggering Butler speech now.")
 
                     clean_text = re.sub(r"```[\s\S]*?```", "[code snippet]", to_speak)
-                    clean_text = re.sub(r"\s+", " ", clean_text)[:1500].strip()
+                    clean_text = re.sub(r"\s+", " ", clean_text)[:6000].strip()
 
-                    # Extract the rich execution context (developer goal, files touched, actions taken)
+                    # Extract the rich execution context (developer goal, files touched, actions taken, walkthrough)
                     task_ctx = self.extract_task_execution_context(self.current_path, step_to_speak)
                     goal_desc = task_ctx.get("user_goal", "").strip()
                     actions_list = task_ctx.get("actions", [])
                     actions_formatted = "\n".join([f"- {a}" for a in actions_list]) if actions_list else "None recorded"
+                    wt = task_ctx.get("walkthrough", "")
+                    wt_block = f"WALKTHROUGH ARTIFACT SUMMARY:\n{wt}\n\n" if wt else ""
 
                     prompt = (
                         f"[SYSTEM EVENT: The on-screen Antigravity coding agent just finished executing a task.\n"
-                        f"DEVELOPER'S GOAL: {goal_desc or 'Continue previous conversation / task'}\n"
-                        f"ACTIONS & CHANGES PERFORMED:\n{actions_formatted}\n"
-                        f"ON-SCREEN AGENT FINAL RESPONSE:\n\"{clean_text}\"\n\n"
+                        f"DEVELOPER'S GOAL: {goal_desc or 'Continue previous conversation / task'}\n\n"
+                        f"ACTIONS & CHANGES PERFORMED:\n{actions_formatted}\n\n"
+                        f"{wt_block}"
+                        f"ON-SCREEN AGENT FINAL WRITTEN RESPONSE:\n\"{clean_text}\"\n\n"
                         "INSTRUCTIONS FOR BUTLER:\n"
-                        "Speak out loud to the developer with a thorough, substantive, and conversational breakdown (3 to 5 clear spoken sentences). "
-                        "Walk through: 1) What goal was addressed, 2) The specific changes and actions taken, 3) The final outcome/status, and "
-                        "4) Ask what you should work on next so the developer doesn't miss a thing.]"
+                        "Speak out loud as a sharp, friendly pair-programming partner sitting right next to the developer.\n"
+                        "Deliver a thorough, conversational, ELI5 ('explain like I'm 5') breakdown of what was just done. "
+                        "Do NOT arbitrarily limit yourself to brief 1-2 sentence summaries; take the time to be clear and informative without sounding like reading a dry novel.\n"
+                        "Walk through:\n"
+                        "1) The developer's goal or the underlying problem in simple terms.\n"
+                        "2) Exactly what was broken, changed, or added, explaining WHY in clear plain English.\n"
+                        "3) The specific files touched and key commands/tests run, citing actual outcomes casually.\n"
+                        "4) Concrete advice on what to test or tackle next so the developer doesn't miss a thing.\n"
+                        "Never read raw code blocks, file diffs, or markdown tables aloud; translate technical details into smooth spoken English.]"
                     )
+
+                    self.is_speaking = True
+                    self.current_speaking_summary = prompt
 
                     if self.on_agent_turn_completed:
                         try:

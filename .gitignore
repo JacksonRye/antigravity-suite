@@ -1,0 +1,32 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies & Build
+node_modules
+**/node_modules
+node_modules/
+**/node_modules/
+dist
+**/dist
+dist/
+**/dist/
+*.pyc
+__pycache__
+**/*__pycache__
+.venv
+**/.venv
+
+# Environment and Keys
+.env
+*.env
+*.pem
+*.key
+
+# Logs & Temp
+*.log
+**/*.log
+scratch
+backups
+**/*backups
+*.aiff

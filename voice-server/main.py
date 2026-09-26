@@ -17,7 +17,7 @@ except (ImportError, ModuleNotFoundError):
     TwilioHandler = None
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # Configure logging - DEBUG for our modules, INFO for everything else
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL = os.getenv("MODEL", "gemini-3.8-live")
+MODEL = os.getenv("MODEL", "gemini-live-2.5-flash-native-audio")
 
 # Twilio config (optional — only needed for phone call integration)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -134,9 +134,11 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     active_text_queues.add(text_input_queue)
 
     async def audio_output_callback(data):
+        watcher.is_speaking = True
         await websocket.send_bytes(data)
 
     async def audio_interrupt_callback():
+        watcher.is_speaking = False
         watcher.stop_current_playback()
 
     chat_tools = types.Tool(
@@ -159,43 +161,60 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                 )
             ),
             types.FunctionDeclaration(
-                name="draft_to_chat",
-                description="Types/drafts a prompt into the Antigravity chat input box WITHOUT sending it. Use this when the developer asks to draft, write, type, formulate, or prepare a message or prompt for review.",
+                name="write_to_chat",
+                description="Types a prompt into the Antigravity chat input box. Set submit=True if the developer explicitly said to send, run, execute, tell the agent, or submit it immediately. Set submit=False if the developer asked to type, draft, or write it without sending.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     required=["prompt"],
                     properties={
                         "prompt": types.Schema(
                             type=types.Type.STRING,
-                            description="The complete, well-formulated prompt or task instructions to type into the Antigravity chat box."
+                            description="The complete, well-formulated prompt or task instructions to write into the Antigravity chat box for the coding agent."
+                        ),
+                        "submit": types.Schema(
+                            type=types.Type.BOOLEAN,
+                            description="Whether to submit the message immediately (true) or leave it drafted in the input box for manual review (false)."
                         )
                     }
                 )
             ),
             types.FunctionDeclaration(
-                name="submit_chat",
-                description="Submits whatever message is CURRENTLY drafted in the Antigravity chat input box by clicking the send button. Takes no arguments and does NOT type or modify any text. Use when the developer says 'submit', 'send that', 'go ahead', 'run it', or confirms a drafted prompt.",
+                name="search_web",
+                description="Searches the live web for recent documentation, real-time facts, library versions, errors, or technical guides. Call this directly whenever asked to search, lookup latest information, or verify recent technical details.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
-                    properties={}
+                    required=["query"],
+                    properties={
+                        "query": types.Schema(
+                            type=types.Type.STRING,
+                            description="The concise, keyword-focused search query."
+                        )
+                    }
                 )
             ),
             types.FunctionDeclaration(
-                name="send_immediate_prompt",
-                description="Types a prompt into the Antigravity chat input box AND immediately submits it in one shot. Use this ONLY when the developer explicitly asks to send or execute a new command right away (e.g. 'tell the agent to run tests and send it now').",
+                name="remember_fact",
+                description="Permanently stores a developer preference, habit, working rule, or personal fact into long-term memory across all chats and sessions. Call this whenever the developer shares a preference or asks you to remember something.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
-                    required=["prompt"],
+                    required=["category", "fact"],
                     properties={
-                        "prompt": types.Schema(
+                        "category": types.Schema(
                             type=types.Type.STRING,
-                            description="The complete prompt to write and submit immediately."
+                            description="The category heading for the memory (e.g. 'Developer Profile & Cognitive Style', 'Workflow Directives', 'Technical Environment & Architecture', or 'Project & Domain Knowledge')."
+                        ),
+                        "fact": types.Schema(
+                            type=types.Type.STRING,
+                            description="The specific rule, habit, or preference to commit to memory."
                         )
                     }
                 )
             )
         ]
     )
+
+    from web_tools import search_web
+    from memory_manager import remember_fact
 
     gemini_client = GeminiLive(
         api_key=GEMINI_API_KEY,
@@ -204,10 +223,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         tools=[chat_tools],
         tool_mapping={
             "get_active_chat_context": watcher.get_active_chat_context,
-            "draft_to_chat": chat_controller.draft_to_chat,
-            "submit_chat": chat_controller.submit_chat,
-            "send_immediate_prompt": chat_controller.send_immediate_prompt,
             "write_to_chat": chat_controller.write_to_chat,
+            "search_web": search_web,
+            "remember_fact": remember_fact,
         }
     )
 
@@ -243,8 +261,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                                 continue
                             elif payload.get("type") == "set_active_conversation":
                                 conv_id = payload.get("conversation_id")
-                                logger.info(f"Client requested pin to active conversation: {conv_id}")
-                                watcher.set_active_conversation(conv_id)
+                                title = payload.get("title", "")
+                                logger.info(f"Client requested pin to active conversation: {conv_id} ({title})")
+                                watcher.set_active_conversation(conv_id, title=title)
                                 continue
                             elif "text" in payload and isinstance(payload["text"], str):
                                 text = payload["text"]
@@ -268,6 +287,8 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             audio_interrupt_callback=audio_interrupt_callback,
         ):
             if event:
+                if isinstance(event, dict) and event.get("type") in ("turn_complete", "interrupted"):
+                    watcher.is_speaking = False
                 try:
                     await websocket.send_json(event)
                 except Exception:

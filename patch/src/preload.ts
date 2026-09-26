@@ -1510,6 +1510,30 @@ window.addEventListener('DOMContentLoaded', () => {
       return null;
     }
 
+    // Scrapes title or prompt preview of active conversation
+    function getActiveConversationTitle(): string {
+      try {
+        const selectedRow = document.querySelector('[data-testid="conversation-row-sidebar"][data-selected="true"], [data-selected="true"][data-cascade-id]');
+        if (selectedRow) {
+          const titleEl = selectedRow.querySelector('.title, .name, [data-testid="conversation-title"], span');
+          const t = (titleEl?.textContent || selectedRow.textContent || '').trim();
+          if (t && t.length > 1 && !/^[0-9a-f-]{36}$/i.test(t)) {
+            return t.slice(0, 60);
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const headerTitle = document.querySelector('.conversation-title, [data-testid="header-title"], .active-tab-title');
+        if (headerTitle && headerTitle.textContent) {
+          const t = headerTitle.textContent.trim();
+          if (t && t.length > 1) return t.slice(0, 60);
+        }
+      } catch (_) {}
+
+      return '';
+    }
+
     // Scrapes visible on-screen chat context from Antigravity IDE
     function getVisibleChatHistory(): string {
       const items: { role: string; text: string }[] = [];
@@ -2019,10 +2043,28 @@ window.addEventListener('DOMContentLoaded', () => {
                   renderTranscriptLine('User', msg.text);
                 } else if ((msg.type === 'model' || msg.type === 'gemini') && msg.text) {
                   renderTranscriptLine('Gemini', msg.text);
+                } else if (msg.type === 'tool_start') {
+                  if (msg.name === 'search_web') {
+                    const query = msg.args?.query || '';
+                    updateUiState('speaking', '🔍 Searching Google...');
+                    logMsg('TOOL', `🔍 Butler calling Google Search: "${escapeHtml(query)}"`, 'info');
+                    try {
+                      // Spoken verbal announcement using Web Speech API
+                      if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                        const utterance = new SpeechSynthesisUtterance('Searching Google now.');
+                        utterance.rate = 1.1;
+                        utterance.pitch = 1.0;
+                        window.speechSynthesis.speak(utterance);
+                      }
+                    } catch (_) {}
+                  } else {
+                    logMsg('TOOL', `Starting tool: ${msg.name}`, 'info');
+                  }
                 } else if (msg.type === 'tool_call') {
                   if (msg.name === 'search_web') {
                     const query = msg.args?.query || '';
-                    const results = msg.result?.results || [];
+                    const results = msg.result?.results || msg.result?.sources || [];
                     let cardHtml = `<strong>🔍 Web Search:</strong> <em>"${escapeHtml(query)}"</em><br/>`;
                     if (results.length > 0) {
                       cardHtml += `<div style="margin-top:4px;padding-left:8px;border-left:2px solid #38bdf8;">`;
@@ -2074,8 +2116,9 @@ window.addEventListener('DOMContentLoaded', () => {
             // Pin Butler exclusively to the active chat session and monitor for tab switches
             let currentTrackedConvId = initialConvId || getActiveConversationId();
             if (currentTrackedConvId) {
-              ws.send(JSON.stringify({ type: 'set_active_conversation', conversation_id: currentTrackedConvId }));
-              logMsg('BUTLER', `Pinned Butler to active chat: ${currentTrackedConvId}`, 'info');
+              const curTitle = getActiveConversationTitle();
+              ws.send(JSON.stringify({ type: 'set_active_conversation', conversation_id: currentTrackedConvId, title: curTitle }));
+              logMsg('BUTLER', `Pinned Butler to active chat: ${currentTrackedConvId}${curTitle ? ' (' + curTitle + ')' : ''}`, 'info');
             }
 
             if (activeConvInterval) clearInterval(activeConvInterval);
@@ -2083,32 +2126,12 @@ window.addEventListener('DOMContentLoaded', () => {
               const latestId = getActiveConversationId();
               if (latestId && latestId !== currentTrackedConvId) {
                 currentTrackedConvId = latestId;
-                logMsg('BUTLER', `Active chat tab switched to: ${latestId}. Cleanly resetting Gemini Live session...`, 'info');
-                stopAudioPlayback();
-                if (ws) {
-                  try {
-                    ws.onclose = null;
-                    ws.onerror = null;
-                    ws.close();
-                  } catch (_) {}
-                  ws = null;
+                const newTitle = getActiveConversationTitle();
+                logMsg('BUTLER', `Active chat tab switched to: ${latestId}${newTitle ? ' (' + newTitle + ')' : ''}. Updating Butler context seamlessly...`, 'info');
+                // Seamless in-band context update: keep live voice call open without reconnecting!
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'set_active_conversation', conversation_id: latestId, title: newTitle }));
                 }
-                const newBaseUrl = buildGatewayUrl();
-                const newWsUrl = `${newBaseUrl}${newBaseUrl.includes('?') ? '&' : '?'}conversation_id=${encodeURIComponent(latestId)}`;
-                logMsg('WS', `Reconnecting to Gemini Live for tab ${latestId}...`, 'ws');
-                ws = new WebSocket(newWsUrl);
-                ws.binaryType = 'arraybuffer';
-                ws.onopen = () => {
-                  logMsg('WS', `Connected to clean Gemini Live session for tab: ${latestId}`, 'success');
-                  ws.send(JSON.stringify({ type: 'set_active_conversation', conversation_id: latestId }));
-                };
-                ws.onmessage = handleWsMessage;
-                ws.onclose = () => {
-                  logMsg('WS', 'Session disconnected.', 'ws');
-                };
-                ws.onerror = (e) => {
-                  logMsg('ERROR', 'WebSocket error during reconnect.', 'error');
-                };
               }
             }, 300);
           };
@@ -2251,7 +2274,7 @@ window.addEventListener('DOMContentLoaded', () => {
             ws.send(silence.buffer);
           }
 
-          // Watchdog: If Gemini does not send audio or turn_complete within 8s, cleanly reset to listening
+          // Watchdog: Allow up to 25s for Google Search grounding and tool synthesis
           if (pauseThinkingTimeout) clearTimeout(pauseThinkingTimeout);
           pauseThinkingTimeout = setTimeout(() => {
             if (scheduledSources.length === 0 && voiceState !== 'idle') {
@@ -2259,7 +2282,7 @@ window.addEventListener('DOMContentLoaded', () => {
               updateUiState('listening', '🎙️ Listening... (Speak naturally)');
             }
             pauseThinkingTimeout = null;
-          }, 8000);
+          }, 25000);
         }
       };
 

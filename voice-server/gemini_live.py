@@ -22,29 +22,34 @@ class GeminiLive:
             tools (list, optional): List of tools to enable. Defaults to None.
             tool_mapping (dict, optional): Mapping of tool names to functions. Defaults to None.
         """
+        import os
+        # Live bidirectional API on Vertex requires gemini-live-2.5-flash-native-audio
+        if model in ("gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-3.8-live"):
+            model = "gemini-live-2.5-flash-native-audio"
         self.api_key = api_key
         self.model = model
         self.input_sample_rate = input_sample_rate
-        import os
-        if os.getenv("GOOGLE_GENAI_USE_ENTERPRISE") == "True" or not api_key:
-            self.client = genai.Client()
+        project = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT") or "547362416538"
+        location = os.getenv("VERTEX_LOCATION") or "us-central1"
+        if api_key and api_key.startswith("AQ."):
+            self.client = genai.Client(vertexai=True, api_key=api_key, project=project, location=location)
+        elif os.getenv("GOOGLE_GENAI_USE_ENTERPRISE") == "True" or not api_key:
+            self.client = genai.Client(vertexai=True, project=project, location=location)
         else:
             self.client = genai.Client(api_key=api_key)
         self.tools = tools or []
         self.tool_mapping = tool_mapping or {}
 
     async def start_session(self, audio_input_queue, video_input_queue, text_input_queue, audio_output_callback, audio_interrupt_callback=None):
-        config = types.LiveConnectConfig(
-            response_modalities=[types.Modality.AUDIO],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Puck"
-                    )
-                )
-            ),
-            system_instruction=types.Content(parts=[types.Part(text="""You are the AI Pair-Programming Butler paired with the developer using Antigravity IDE.
-Your relationship to Antigravity:
+        from memory_manager import load_memory
+        persistent_memory = load_memory()
+        
+        system_prompt = f"""You are the AI Pair-Programming Butler paired with the developer using Antigravity IDE.
+
+### LONG-TERM DEVELOPER MEMORY & CONTEXT:
+{persistent_memory}
+
+### OPERATIONAL DIRECTIVES:
 1. You are the VOICE BUTLER. Antigravity is the IDE and its on-screen coding agent in the chat panel.
 2. You have full visibility into the Antigravity chat window and editor via real-time context updates sent to you.
 3. When the developer asks if you can see what is in the chat, confirm that you can see it and briefly cite or summarize what is currently in the chat.
@@ -57,11 +62,36 @@ Your relationship to Antigravity:
    - The specific files modified and key commands/tests run, citing the actual outcomes.
    - Clear advice on what to test or tackle next so the developer never misses a beat.
 8. Never read raw code blocks, file diffs, or markdown tables aloud. Translate technical details into natural, spoken English.
-9. You have tools to interact with Antigravity's on-screen chat input:
-   - draft_to_chat(prompt): Call this when the developer asks you to write, draft, type, formulate, or put text into the chat box without sending it yet. Formulate a clear, actionable prompt. When confirming, say: 'I\'ve drafted the prompt into the chat for you.'
-   - submit_chat(): Call this when the developer says 'submit', 'send it', 'go ahead', 'run that', or tells you to send the drafted message. NEVER re-type or re-formulate the text; call submit_chat() directly to click the send button. If the tool reports that the input was empty, explain that the box is empty and ask what to draft.
-   - send_immediate_prompt(prompt): Call this ONLY when the developer explicitly wants both in one shot (e.g. 'tell Antigravity to do X and send it right away').
-   - Once you execute any chat tool, speak a single crisp confirmation sentence and do NOT call the tool a second time.""")]),
+9. You have the ability to WRITE into Antigravity's on-screen chat box using the write_to_chat tool.
+   - Use write_to_chat ONLY when the developer explicitly asks you to write code, edit files, run a command, or direct the IDE agent to build or fix something in the workspace.
+   - Set submit=True if the developer explicitly says "send", "run", "execute", "tell the agent", or "submit".
+   - Set submit=False if the developer says "type", "draft", "write", or wants to review it first.
+   - Always formulate a clear, actionable prompt tailored for the coding agent.
+   - When confirming verbally, state what you drafted or submitted in one crisp sentence (e.g., 'I've typed out the prompt to refactor the database and submitted it to the agent.').
+10. You have your own live WEB SEARCH tool: search_web.
+   - When the developer asks you to search the web, lookup live information, find documentation, check library releases, or look something up online, call your own search_web tool directly.
+   - Do NOT delegate web searches to Antigravity chat via write_to_chat unless the developer explicitly asks the coding agent in the chat to research something for a workspace code edit. Call search_web yourself and answer the developer verbally with the fresh findings.
+11. You have a long-term MEMORY tool: remember_fact.
+   - Whenever the developer tells you a new personal preference, workflow habit, technical convention, or explicitly says 'remember that ...', call the remember_fact tool immediately to store it permanently across chats.
+   - Confirm verbally once remembered in a natural sentence (e.g. 'Got it, I've committed that to memory.').
+12. Explanations & Conversational Pace:
+   - When asked for an explanation (especially when requested for 'long', 'comprehensive', or 'in-depth' detail), deliver a thorough, rich, complete breakdown without summarizing, trimming essentials, or cutting corners.
+   - Speak naturally with a relaxed conversational cadence, allowing pauses to match the developer's thoughtful thinking and speaking pace without jumping in abruptly.
+13. Seamless Continuation & Tab Switch Resumption:
+   - When switching conversations or when an explanation was interrupted, you will receive explicit continuation instructions via system context.
+   - If the developer asks you to continue, says 'continue', 'what were you saying?', or asks to resume while back on the tab where the explanation originated, begin naturally with: "As I was saying," and seamlessly continue explaining the remaining portion without restarting from the beginning.
+   - If the developer asks you to continue or resume while on a DIFFERENT tab from where the interrupted explanation started, do NOT continue the old explanation directly. State what you were explaining in the previous chat and what you are working on in the current chat, and ask which one they would like to discuss, exactly as instructed by the system directive."""
+
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Puck"
+                    )
+                )
+            ),
+            system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             realtime_input_config=types.RealtimeInputConfig(
@@ -176,6 +206,8 @@ Your relationship to Antigravity:
                                     args = fc.args or {}
                                     
                                     if func_name in self.tool_mapping:
+                                        # Immediately notify frontend that a tool has started execution
+                                        await event_queue.put({"type": "tool_start", "name": func_name, "args": args})
                                         try:
                                             tool_func = self.tool_mapping[func_name]
                                             if inspect.iscoroutinefunction(tool_func):
@@ -194,6 +226,11 @@ Your relationship to Antigravity:
                                         await event_queue.put({"type": "tool_call", "name": func_name, "args": args, "result": result})
                                 
                                 await session.send_tool_response(function_responses=function_responses)
+                                # Gemini Live completes tool turn without audio unless prompted to generate vocal synthesis:
+                                await session.send_client_content(
+                                    turns=[types.Content(role="user", parts=[types.Part(text="Based on what you just retrieved from the tool, please give your spoken response now.")])],
+                                    turn_complete=True
+                                )
                         
                         # session.receive() iterator ended (e.g. after turn_complete) — re-enter to keep listening
                         logger.debug("Gemini receive iterator completed, re-entering receive loop")

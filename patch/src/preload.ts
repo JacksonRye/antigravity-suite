@@ -1089,13 +1089,15 @@ window.addEventListener('DOMContentLoaded', () => {
     style.textContent = `
       #agy-voice-container {
         position: fixed;
-        bottom: 22px;
-        right: 22px;
+        bottom: 80px;
+        right: 24px;
         z-index: 999999;
         display: flex;
         align-items: center;
         gap: 8px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        touch-action: none;
+        user-select: none;
       }
       #agy-voice-btn {
         width: 44px;
@@ -1109,10 +1111,14 @@ window.addEventListener('DOMContentLoaded', () => {
         display: flex;
         align-items: center;
         justify-content: center;
-        cursor: pointer;
+        cursor: grab;
         user-select: none;
         color: #94a3b8;
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      #agy-voice-container.dragging #agy-voice-btn {
+        cursor: grabbing;
+        transform: scale(1.05);
       }
       #agy-voice-btn:hover {
         transform: scale(1.08);
@@ -1369,6 +1375,104 @@ window.addEventListener('DOMContentLoaded', () => {
     container.appendChild(consoleBtn);
     container.appendChild(micBtn);
     document.body.appendChild(container);
+
+    // Position restoration & Draggable interaction
+    try {
+      const savedPosStr = localStorage.getItem('agy_voice_button_pos');
+      if (savedPosStr) {
+        const pos = JSON.parse(savedPosStr);
+        if (typeof pos.top === 'number' && typeof pos.left === 'number') {
+          // Clamp to current viewport
+          const clampedTop = Math.max(10, Math.min(window.innerHeight - 56, pos.top));
+          const clampedLeft = Math.max(10, Math.min(window.innerWidth - 60, pos.left));
+          container.style.top = clampedTop + 'px';
+          container.style.left = clampedLeft + 'px';
+          container.style.bottom = 'auto';
+          container.style.right = 'auto';
+        }
+      }
+    } catch (_) {}
+
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let initialContainerX = 0;
+    let initialContainerY = 0;
+    let hasMoved = false;
+
+    function onPointerDown(e: MouseEvent | TouchEvent) {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+      isDragging = true;
+      hasMoved = false;
+      dragStartX = clientX;
+      dragStartY = clientY;
+
+      const rect = container.getBoundingClientRect();
+      initialContainerX = rect.left;
+      initialContainerY = rect.top;
+
+      window.addEventListener('mousemove', onPointerMove, { passive: false });
+      window.addEventListener('mouseup', onPointerUp);
+      window.addEventListener('touchmove', onPointerMove, { passive: false });
+      window.addEventListener('touchend', onPointerUp);
+    }
+
+    function onPointerMove(e: MouseEvent | TouchEvent) {
+      if (!isDragging) return;
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+      const dx = clientX - dragStartX;
+      const dy = clientY - dragStartY;
+
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        hasMoved = true;
+        container.classList.add('dragging');
+      }
+
+      if (hasMoved) {
+        e.preventDefault();
+        let newX = initialContainerX + dx;
+        let newY = initialContainerY + dy;
+
+        // Viewport boundaries
+        const maxX = window.innerWidth - container.offsetWidth - 10;
+        const maxY = window.innerHeight - container.offsetHeight - 10;
+        newX = Math.max(10, Math.min(maxX, newX));
+        newY = Math.max(10, Math.min(maxY, newY));
+
+        container.style.left = newX + 'px';
+        container.style.top = newY + 'px';
+        container.style.bottom = 'auto';
+        container.style.right = 'auto';
+      }
+    }
+
+    function onPointerUp() {
+      if (!isDragging) return;
+      isDragging = false;
+      container.classList.remove('dragging');
+
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('touchmove', onPointerMove);
+      window.removeEventListener('touchend', onPointerUp);
+
+      if (hasMoved) {
+        const rect = container.getBoundingClientRect();
+        try {
+          localStorage.setItem(
+            'agy_voice_button_pos',
+            JSON.stringify({ top: Math.round(rect.top), left: Math.round(rect.left) }),
+          );
+        } catch (_) {}
+      }
+    }
+
+    container.addEventListener('mousedown', onPointerDown);
+    container.addEventListener('touchstart', onPointerDown, { passive: true });
 
     // 3. Create Live Debug Console Drawer
     const drawer = document.createElement('div');
@@ -1637,9 +1741,13 @@ window.addEventListener('DOMContentLoaded', () => {
       if (next && logsWindow) logsWindow.scrollTop = logsWindow.scrollHeight;
     }
 
-    consoleBtn.addEventListener('click', () => toggleDrawer());
+    consoleBtn.addEventListener('click', () => {
+      if (!hasMoved) toggleDrawer();
+    });
     drawer.querySelector('#agy-btn-close-console')?.addEventListener('click', () => toggleDrawer(false));
-    badge.addEventListener('click', () => toggleDrawer(true));
+    badge.addEventListener('click', () => {
+      if (!hasMoved) toggleDrawer(true);
+    });
 
     // Open Chrome DevTools button
     drawer.querySelector('#agy-btn-devtools')?.addEventListener('click', async () => {
@@ -2345,6 +2453,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleVoiceTrigger() {
+      if (hasMoved) return; // Prevent triggering session when user just dragged/repositioned
       if (voiceState === 'idle') {
         void startVoiceSession();
       } else if (voiceState === 'speaking') {

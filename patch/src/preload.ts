@@ -1559,7 +1559,60 @@ window.addEventListener('DOMContentLoaded', () => {
     let lastSummarizedHash = '';
     let wasGenerating = false;
 
+    // Streaming transcript accumulator for live speech turns
+    let activeTranscriptSpeaker: 'User' | 'Gemini' | null = null;
+    let activeTranscriptText = '';
+    let activeTranscriptLineEl: HTMLElement | null = null;
+
+    function renderTranscriptToken(speaker: 'User' | 'Gemini', token: string) {
+      if (activeTranscriptSpeaker !== speaker) {
+        // Finalize previous turn if speaker switched without explicit turn completion
+        finalizeTranscriptTurn();
+        activeTranscriptSpeaker = speaker;
+        activeTranscriptText = '';
+        activeTranscriptLineEl = null;
+      }
+
+      // Concatenate token neatly with proper spacing
+      if (!activeTranscriptText) {
+        activeTranscriptText = token;
+      } else {
+        const needsSpace = !activeTranscriptText.endsWith(' ') && !activeTranscriptText.endsWith('\n') && !/^[,.:;?!'’”]/.test(token);
+        activeTranscriptText += (needsSpace ? ' ' : '') + token;
+      }
+
+      const d = new Date();
+      const ts = d.toTimeString().split(' ')[0] + '.' + String(d.getMilliseconds()).padStart(3, '0');
+      const level = speaker === 'User' ? 'mic' : 'model';
+      const category = speaker.toUpperCase();
+
+      if (logsWindow) {
+        if (!activeTranscriptLineEl || !activeTranscriptLineEl.parentElement) {
+          activeTranscriptLineEl = document.createElement('div');
+          activeTranscriptLineEl.className = 'agy-log-line';
+          logsWindow.appendChild(activeTranscriptLineEl);
+        }
+        activeTranscriptLineEl.innerHTML = `<span class="agy-log-ts">[${ts}]</span> <span class="agy-tag-${level}">[${category}]</span> <span>${escapeHtml(activeTranscriptText)}</span>`;
+        logsWindow.scrollTop = logsWindow.scrollHeight;
+      }
+    }
+
+    function finalizeTranscriptTurn() {
+      if (activeTranscriptSpeaker && activeTranscriptText.trim()) {
+        const d = new Date();
+        const ts = d.toTimeString().split(' ')[0] + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        const cleanLine = `[${ts}] [${activeTranscriptSpeaker.toUpperCase()}] ${activeTranscriptText.trim()}`;
+        rawLogs.push(cleanLine);
+        if (rawLogs.length > 300) rawLogs.shift();
+        console.log(`[Voice][${activeTranscriptSpeaker.toUpperCase()}]`, activeTranscriptText.trim());
+      }
+      activeTranscriptSpeaker = null;
+      activeTranscriptText = '';
+      activeTranscriptLineEl = null;
+    }
+
     function renderTranscriptLine(speaker: 'User' | 'Gemini', text: string) {
+      finalizeTranscriptTurn();
       logMsg(speaker.toUpperCase(), text, speaker === 'User' ? 'mic' : 'model');
     }
 
@@ -1762,6 +1815,9 @@ window.addEventListener('DOMContentLoaded', () => {
     // Clear logs button
     drawer.querySelector('#agy-btn-clear-logs')?.addEventListener('click', () => {
       rawLogs.length = 0;
+      activeTranscriptSpeaker = null;
+      activeTranscriptText = '';
+      activeTranscriptLineEl = null;
       if (logsWindow) logsWindow.innerHTML = '';
       logMsg('CONSOLE', 'Logs cleared.', 'info');
     });
@@ -2136,9 +2192,11 @@ window.addEventListener('DOMContentLoaded', () => {
                     }
                   }
                 } else if (msg.type === 'interrupted') {
+                  finalizeTranscriptTurn();
                   logMsg('STATUS', 'Session interrupted.', 'vad');
                   stopAudioPlayback();
                 } else if (msg.type === 'turn_complete') {
+                  finalizeTranscriptTurn();
                   logMsg('STATUS', 'Turn complete.', 'info');
                   if (pauseThinkingTimeout) {
                     clearTimeout(pauseThinkingTimeout);
@@ -2148,9 +2206,9 @@ window.addEventListener('DOMContentLoaded', () => {
                     updateUiState('listening', '🎙️ Listening... (Speak naturally anytime)');
                   }
                 } else if (msg.type === 'user' && msg.text) {
-                  renderTranscriptLine('User', msg.text);
+                  renderTranscriptToken('User', msg.text);
                 } else if ((msg.type === 'model' || msg.type === 'gemini') && msg.text) {
-                  renderTranscriptLine('Gemini', msg.text);
+                  renderTranscriptToken('Gemini', msg.text);
                 } else if (msg.type === 'tool_start') {
                   if (msg.name === 'search_web') {
                     const query = msg.args?.query || '';
@@ -2399,6 +2457,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     function stopVoiceSession() {
+      finalizeTranscriptTurn();
       isUserSpeaking = false;
       if (pauseThinkingTimeout) {
         clearTimeout(pauseThinkingTimeout);

@@ -1496,6 +1496,13 @@ window.addEventListener('DOMContentLoaded', () => {
       </div>
       <div class="agy-config-box">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;" title="In public places, locks playback so ambient cafe noise cannot cut Gemini off. Tap mic or Cmd+Shift+V to manually interrupt.">
+            <input type="checkbox" id="agy-toggle-public-mode" style="cursor:pointer;" />
+            <span><strong>🛡️ Public Mode (Speech Lock)</strong></span>
+          </label>
+          <span id="agy-public-mode-status" style="font-size:11px;color:#9ca3af;">Off</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="checkbox" id="agy-toggle-wakeword" style="cursor:pointer;" />
             <span><strong>Hands-Free Wake Word</strong> (Experimental - Off)</span>
@@ -1521,6 +1528,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const meterInner = drawer.querySelector('#agy-mic-meter-inner') as HTMLDivElement;
     const meterVal = drawer.querySelector('#agy-meter-val') as HTMLSpanElement;
     const serviceUrlInput = drawer.querySelector('#agy-service-url-input') as HTMLInputElement;
+    const publicModeToggle = drawer.querySelector('#agy-toggle-public-mode') as HTMLInputElement;
+    const publicModeStatus = drawer.querySelector('#agy-public-mode-status') as HTMLSpanElement;
     const wakeWordToggle = drawer.querySelector('#agy-toggle-wakeword') as HTMLInputElement;
     const wakeWordStatus = drawer.querySelector('#agy-wakeword-status') as HTMLSpanElement;
 
@@ -2386,8 +2395,15 @@ window.addEventListener('DOMContentLoaded', () => {
         const now = Date.now();
 
         // ─── BARGE-IN / INTERRUPTION HANDLING ───
-        // If Gemini is currently speaking and user starts talking louder than background bleed:
+        // If Gemini is currently speaking:
         if (isButlerAudioPlaying) {
+          if (publicModeEnabled) {
+            // STRICT PUBLIC LOCK: Auto barge-in is disabled completely!
+            // Do not allow ambient coffee shop noise or loud nearby people to cut Gemini off.
+            // Microphone streaming is muted during Gemini playback to protect server-side VAD.
+            return;
+          }
+
           const bargeInThreshold = Math.max(0.040, speechThreshold * 1.4);
           if (rms > bargeInThreshold) {
             logMsg('INTERRUPT', `Barge-in vocal interrupt detected (RMS: ${rms.toFixed(3)})! Stopping playback.`, 'vad');
@@ -2413,7 +2429,7 @@ window.addEventListener('DOMContentLoaded', () => {
           pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
         }
 
-        // Immediate speech detection: single frame is sufficient to mark speech active
+        // Immediate speech detection
         if (rms > speechThreshold) {
           lastVocalSpeechTime = now;
 
@@ -2424,8 +2440,13 @@ window.addEventListener('DOMContentLoaded', () => {
           }
         }
 
-        // CONTINUOUS STREAMING: Always stream mic frames over WebSocket when session is open
-        // Gemini Live's native server-side neural VAD handles real-time semantic endpointing!
+        // Audio frame streaming:
+        // In Public Mode, gate mic streaming so ambient background chatter does not stream into Gemini when idle
+        if (publicModeEnabled && !isUserSpeaking) {
+          // Do not transmit background murmur to Gemini Live
+          return;
+        }
+
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(pcm16.buffer);
         }
@@ -2526,6 +2547,34 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     micBtn.addEventListener('click', handleVoiceTrigger);
+
+    // ─── Public Mode (Strict Speech Lock) ───
+    let publicModeEnabled = false;
+    try {
+      const savedPublicSetting = localStorage.getItem('agy_public_mode_enabled');
+      if (savedPublicSetting !== null) {
+        publicModeEnabled = savedPublicSetting === 'true';
+      }
+    } catch (_) {}
+
+    if (publicModeToggle) {
+      publicModeToggle.checked = publicModeEnabled;
+      if (publicModeStatus) {
+        publicModeStatus.textContent = publicModeEnabled ? 'Locked 🛡️' : 'Off';
+        publicModeStatus.style.color = publicModeEnabled ? '#38bdf8' : '#9ca3af';
+      }
+      publicModeToggle.addEventListener('change', () => {
+        publicModeEnabled = publicModeToggle.checked;
+        try {
+          localStorage.setItem('agy_public_mode_enabled', String(publicModeEnabled));
+        } catch (_) {}
+        if (publicModeStatus) {
+          publicModeStatus.textContent = publicModeEnabled ? 'Locked 🛡️' : 'Off';
+          publicModeStatus.style.color = publicModeEnabled ? '#38bdf8' : '#9ca3af';
+        }
+        logMsg('MODE', `Public Mode (Strict Speech Lock) ${publicModeEnabled ? 'ENABLED (Auto barge-in disabled, mic muted during playback)' : 'DISABLED'}.`, 'info');
+      });
+    }
 
     // ─── Hands-Free Wake Word Engine (Disabled / On-hold) ───
     let wakeWordEnabled = false;

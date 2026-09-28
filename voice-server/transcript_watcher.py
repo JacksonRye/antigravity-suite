@@ -34,7 +34,17 @@ class TranscriptWatcher:
         self.on_turn_complete = on_turn_complete      # Signal turn complete
         self.on_context_update = on_context_update    # Send updated chat context into Gemini Live session (silent)
         self.on_agent_turn_completed = on_agent_turn_completed  # Trigger Butler to speak when agent finishes
-        self.client = genai.Client()
+        
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("AIPLATFORM_API_KEY") or os.getenv("VERTEX_API_KEY")
+        project = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT") or "547362416538"
+        location = os.getenv("VERTEX_LOCATION") or "us-central1"
+        if api_key and api_key.startswith("AQ."):
+            self.client = genai.Client(vertexai=True, api_key=api_key, project=project, location=location)
+        elif os.getenv("GOOGLE_GENAI_USE_ENTERPRISE") == "True" or not api_key:
+            self.client = genai.Client(vertexai=True, project=project, location=location)
+        else:
+            self.client = genai.Client(api_key=api_key)
+            
         self.current_path = None
         self.pinned_conversation_id = None
         self.pinned_timestamp = 0

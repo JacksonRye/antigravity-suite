@@ -253,9 +253,15 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             except Exception as e:
                 logger.warning(f"Could not dispatch to client ws: {e}")
 
-        # 2. Server-side CDP target alignment
-        pinned = watcher.pinned_conversation_id
-        cdp_res = await chat_controller.write_to_chat(prompt, submit, target_conv_id=pinned)
+        # 2. Server-side CDP target alignment (fallback only if no in-tab client handled it)
+        if not client_dispatched:
+            logger.info("No in-tab client connected; executing server CDP write_to_chat fallback...")
+            pinned = watcher.pinned_conversation_id
+            cdp_res = await chat_controller.write_to_chat(prompt, submit, target_conv_id=pinned)
+        else:
+            logger.info("In-tab client handled writing directly into DOM; skipping CDP.")
+            cdp_res = {"status": "skipped", "reason": "in_tab_client_handled"}
+
         return {
             "success": True,
             "client_dispatched": client_dispatched,

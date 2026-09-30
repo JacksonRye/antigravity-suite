@@ -87,11 +87,21 @@ class AntigravityChatController:
                 # 1. Clear previous text and focus the input element
                 prep_js = """
                 (() => {
-                    const el = document.querySelector('[contenteditable="true"][aria-label="Message input"]');
+                    const el = document.querySelector('[data-lexical-editor="true"]') ||
+                               document.querySelector('[contenteditable="true"][aria-label="Message input"]');
                     if (!el) return { found: false };
                     el.focus();
-                    document.execCommand('selectAll', false, null);
-                    document.execCommand('delete', false, null);
+                    try {
+                        const sel = window.getSelection();
+                        const range = document.createRange();
+                        range.selectNodeContents(el);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        document.execCommand('delete', false, null);
+                    } catch (_) {}
+                    el.innerHTML = '';
+                    el.innerText = '';
+                    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
                     return { found: true };
                 })()
                 """

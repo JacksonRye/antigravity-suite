@@ -119,9 +119,35 @@ class AntigravityChatController:
                         "error": "Chat message input element not found in Antigravity window."
                     }
 
-                # 2. Insert new prompt text via CDP Input.insertText
+                # 1b. Dispatch native Ctrl+A and Backspace key events to wipe Lexical AST cleanly
                 await ws.send(json.dumps({
                     "id": 2,
+                    "method": "Input.dispatchKeyEvent",
+                    "params": {"type": "keyDown", "modifiers": 2, "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65}
+                }))
+                await ws.recv()
+                await ws.send(json.dumps({
+                    "id": 3,
+                    "method": "Input.dispatchKeyEvent",
+                    "params": {"type": "keyUp", "modifiers": 2, "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65}
+                }))
+                await ws.recv()
+                await ws.send(json.dumps({
+                    "id": 4,
+                    "method": "Input.dispatchKeyEvent",
+                    "params": {"type": "keyDown", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8}
+                }))
+                await ws.recv()
+                await ws.send(json.dumps({
+                    "id": 5,
+                    "method": "Input.dispatchKeyEvent",
+                    "params": {"type": "keyUp", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8}
+                }))
+                await ws.recv()
+
+                # 2. Insert new prompt text via CDP Input.insertText
+                await ws.send(json.dumps({
+                    "id": 6,
                     "method": "Input.insertText",
                     "params": {"text": prompt}
                 }))

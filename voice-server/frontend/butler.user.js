@@ -318,13 +318,38 @@
     }
   }
 
+  // Find Antigravity Chat Input (Lexical Editor, textarea, or contenteditable)
+  function findChatInputElement() {
+    const selectors = [
+      '[data-lexical-editor="true"]',
+      '[contenteditable="true"][aria-label="Message input"]',
+      '[aria-label="Message input"]',
+      '[role="combobox"][contenteditable]',
+      'div[contenteditable="true"]',
+      'div[contenteditable]',
+      'textarea[aria-label="Message input"]',
+      'textarea'
+    ];
+    for (const sel of selectors) {
+      const found = document.querySelector(sel);
+      if (found && !document.getElementById("ag-butler-in-tab-root")?.contains(found)) {
+        return found;
+      }
+    }
+    const all = document.querySelectorAll('*');
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      if (el.isContentEditable && !document.getElementById("ag-butler-in-tab-root")?.contains(el)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
   // Direct In-DOM Typing Execution
   function writeToCurrentChat(prompt, submit = false) {
     log("[Typing to chat] " + prompt.slice(0, 35) + "...", "#10b981");
-    let el = document.querySelector('[contenteditable="true"][aria-label="Message input"]');
-    if (!el) {
-      el = document.querySelector('textarea[aria-label="Message input"]') || document.querySelector("textarea");
-    }
+    const el = findChatInputElement();
 
     if (!el) {
       log("[Error: Input element not found in DOM]", "#ef4444");
@@ -335,24 +360,55 @@
     if (el.tagName.toLowerCase() === "textarea") {
       el.value = prompt;
       el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
-      document.execCommand("selectAll", false, null);
-      document.execCommand("delete", false, null);
-      document.execCommand("insertText", false, prompt);
+      try {
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("delete", false, null);
+        document.execCommand("insertText", false, prompt);
+      } catch (_) {}
+
+      if (!el.textContent || el.textContent.trim() === "") {
+        el.innerHTML = `<p dir="auto"><span data-lexical-text="true">${prompt}</span></p>`;
+      }
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     if (submit) {
       setTimeout(() => {
-        const btn = document.querySelector('button[aria-label="Send message"]') ||
-                    document.querySelector('button[type="submit"]') ||
-                    document.querySelector('.send-button');
+        let btn = document.querySelector('button[aria-label="Send message"]') ||
+                  document.querySelector('button[aria-label="Send"]') ||
+                  document.querySelector('button[type="submit"]');
+
+        if (!btn) {
+          let p = el.parentElement;
+          for (let i = 0; i < 5; i++) {
+            if (!p) break;
+            const btns = p.querySelectorAll('button');
+            for (const b of btns) {
+              if (b.getAttribute('aria-label')?.toLowerCase().includes('send') || b.className.includes('bg-primary')) {
+                btn = b;
+                break;
+              }
+            }
+            if (btn) break;
+            p = p.parentElement;
+          }
+        }
+
         if (btn && !btn.disabled) {
           btn.click();
           log("[Prompt submitted to Antigravity!]", "#10b981");
         } else {
-          log("[Send button not clickable]", "#fbbf24");
+          el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
+          log("[Dispatched Enter key submission]", "#10b981");
         }
-      }, 120);
+      }, 150);
     }
   }
 

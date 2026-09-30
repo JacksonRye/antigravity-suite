@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Antigravity Voice Butler (Gemini Live)
 // @namespace    https://butler.retake.cloud/
-// @version      2.0.0
+// @version      2.2.0
 // @description  In-Tab Gemini Live Voice Butler with 100% active chat context and direct typing
 // @match        *://*/*
 // @grant        none

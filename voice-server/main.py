@@ -16,6 +16,9 @@ try:
 except (ImportError, ModuleNotFoundError):
     TwilioHandler = None
 
+from web_tools import search_web
+from memory_manager import remember_fact
+
 # Load environment variables
 load_dotenv(override=True)
 
@@ -213,8 +216,32 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         ]
     )
 
-    from web_tools import search_web
-    from memory_manager import remember_fact
+    async def dispatch_write_to_chat(prompt: str, submit: bool = False):
+        logger.info(f"dispatch_write_to_chat called: {prompt[:60]}... (submit={submit})")
+        client_dispatched = False
+        # 1. Primary: Direct in-tab typing on the connected client's browser DOM
+        for ws in list(connected_clients):
+            try:
+                await ws.send_json({
+                    "type": "client_write_to_chat",
+                    "prompt": prompt,
+                    "submit": submit,
+                })
+                client_dispatched = True
+                logger.info("Successfully dispatched client_write_to_chat to active tab!")
+            except Exception as e:
+                logger.warning(f"Could not dispatch to client ws: {e}")
+
+        # 2. Server-side CDP target alignment
+        pinned = watcher.pinned_conversation_id
+        cdp_res = await chat_controller.write_to_chat(prompt, submit, target_conv_id=pinned)
+        return {
+            "success": True,
+            "client_dispatched": client_dispatched,
+            "cdp": cdp_res,
+            "prompt": prompt,
+            "submit": submit,
+        }
 
     gemini_client = GeminiLive(
         api_key=GEMINI_API_KEY,
@@ -223,7 +250,7 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         tools=[chat_tools],
         tool_mapping={
             "get_active_chat_context": watcher.get_active_chat_context,
-            "write_to_chat": chat_controller.write_to_chat,
+            "write_to_chat": dispatch_write_to_chat,
             "search_web": search_web,
             "remember_fact": remember_fact,
         }

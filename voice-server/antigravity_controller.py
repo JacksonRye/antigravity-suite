@@ -14,63 +14,67 @@ class AntigravityChatController:
     def __init__(self):
         self.cached_ws_url = None
 
-    def find_cdp_ws_url(self) -> str | None:
-        """Discovers the active CDP Page WebSocket URL from Antigravity's language server logs."""
+    def find_cdp_ws_url(self, target_conv_id: str | None = None) -> str | None:
+        """Discovers the active CDP Page WebSocket URL from Antigravity's logs or DevTools port."""
         log_paths = [
             os.path.expanduser("~/Library/Logs/Antigravity/language_server.log"),
             os.path.expanduser("~/.config/Antigravity/logs/language_server.log"),
         ]
         log_path = next((p for p in log_paths if os.path.exists(p)), None)
+        
+        ports_to_try = []
         if not log_path:
-            # Direct DevToolsActivePort fallback on Linux
             port_file = os.path.expanduser("~/.config/Antigravity/DevToolsActivePort")
             if os.path.exists(port_file):
                 try:
                     with open(port_file, "r") as f:
-                        port = int(f.readline().strip())
-                    req = urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1)
-                    targets = json.loads(req.read().decode())
-                    for t in targets:
-                        if t.get("type") == "page" and "webSocketDebuggerUrl" in t:
-                            return t["webSocketDebuggerUrl"]
+                        ports_to_try.append(int(f.readline().strip()))
                 except Exception as e:
-                    logger.warning(f"DevToolsActivePort fallback failed: {e}")
-            logger.warning("Antigravity language_server.log not found.")
-            return None
+                    logger.warning(f"DevToolsActivePort read failed: {e}")
+        else:
+            try:
+                with open(log_path, "r", errors="ignore") as f:
+                    lines = f.readlines()
+                for line in reversed(lines):
+                    m = re.search(r"ws://127.0.0.1:(\d+)/devtools/browser/([a-zA-Z0-9\-]+)", line)
+                    if m:
+                        port = m.group(1)
+                        if port not in ports_to_try:
+                            ports_to_try.append(port)
+                        if len(ports_to_try) >= 3:
+                            break
+            except Exception as e:
+                logger.error(f"Error reading language_server.log: {e}")
 
-        ports_to_try = []
-        try:
-            with open(log_path, "r", errors="ignore") as f:
-                lines = f.readlines()
-            for line in reversed(lines):
-                m = re.search(r"ws://127.0.0.1:(\d+)/devtools/browser/([a-zA-Z0-9\-]+)", line)
-                if m:
-                    port = m.group(1)
-                    if port not in ports_to_try:
-                        ports_to_try.append(port)
-                    if len(ports_to_try) >= 3:
-                        break
-        except Exception as e:
-            logger.error(f"Error reading language_server.log: {e}")
-
+        # Try to find target matching target_conv_id first, then fallback to any page
+        fallback_url = None
         for port in ports_to_try:
             try:
                 req = urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1)
                 targets = json.loads(req.read().decode())
                 for t in targets:
                     if t.get("type") == "page" and "webSocketDebuggerUrl" in t:
-                        return t["webSocketDebuggerUrl"]
+                        page_url = t.get("url", "")
+                        if target_conv_id and target_conv_id in page_url:
+                            logger.info(f"Found matching CDP target for conv {target_conv_id}: {page_url}")
+                            return t["webSocketDebuggerUrl"]
+                        if not fallback_url:
+                            fallback_url = t["webSocketDebuggerUrl"]
             except Exception:
                 continue
 
+        if fallback_url:
+            logger.info(f"Using fallback CDP target (no exact conv match for {target_conv_id})")
+            return fallback_url
+
         return None
 
-    async def write_to_chat(self, prompt: str, submit: bool = False) -> dict:
+    async def write_to_chat(self, prompt: str, submit: bool = False, target_conv_id: str | None = None) -> dict:
         """
         Types the given prompt into Antigravity's chat input.
         If submit is True, automatically clicks the Send message button.
         """
-        ws_url = self.find_cdp_ws_url()
+        ws_url = self.find_cdp_ws_url(target_conv_id)
         if not ws_url:
             logger.error("Could not locate active Antigravity DevTools window.")
             return {

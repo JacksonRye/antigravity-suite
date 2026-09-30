@@ -294,25 +294,52 @@
 
   // Active Conversation Identification
   function detectActiveConv() {
-    // 1. Selected conversation row in sidebar (most accurate in Antigravity)
-    const selectedRow = document.querySelector('[data-testid="conversation-row-sidebar"][data-selected="true"]');
+    // 1. Direct active conversation view (THE source of truth rendered on screen)
+    const view = document.querySelector('[data-testid="conversation-view"]');
+    const viewCid = view?.getAttribute('data-cascade-id');
+
+    // 2. Explicit /c/<uuid> in URL pathname or hash
+    const urlMatch = window.location.pathname.match(/\/c\/([0-9a-f-]{36})/i) ||
+                     window.location.hash.match(/\/c\/([0-9a-f-]{36})/i);
+    const urlCid = urlMatch?.[1];
+
+    const cid = viewCid || urlCid;
+
+    // Detect Title
+    let title = "";
+    if (cid) {
+      const row = document.querySelector(`[data-cascade-id="${cid}"]`);
+      if (row) {
+        title = row.querySelector('span')?.innerText?.trim() ||
+                row.querySelector('a')?.getAttribute('aria-label') || "";
+      }
+    }
+
+    if (!title && view) {
+      const headerEl = view.parentElement?.querySelector('nav, header, [class*="breadcrumb"]') ||
+                       document.querySelector('header');
+      if (headerEl) {
+        const parts = headerEl.innerText.split(/[\/\n]/).map(s => s.trim()).filter(Boolean);
+        if (parts.length > 0) title = parts[parts.length - 1];
+      }
+    }
+
+    if (!title && document.title) {
+      title = document.title.replace(/\s*-\s*Antigravity\s*$/i, "").trim();
+    }
+
+    if (cid) {
+      return { id: cid, title: title || "Active Chat" };
+    }
+
+    // 3. Fallback: sidebar row
+    const selectedRow = document.querySelector('[data-testid="conversation-row-sidebar"][data-selected="true"], .bg-sidebar-secondary[data-cascade-id]');
     if (selectedRow) {
-      const cid = selectedRow.getAttribute('data-cascade-id') || selectedRow.querySelector('a')?.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i)?.[1];
-      const title = selectedRow.querySelector('span')?.innerText?.trim() || selectedRow.querySelector('a')?.getAttribute('aria-label') || "";
-      if (cid) return { id: cid, title };
+      const sid = selectedRow.getAttribute('data-cascade-id') || selectedRow.querySelector('a')?.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i)?.[1];
+      const sTitle = selectedRow.querySelector('span')?.innerText?.trim() || "";
+      if (sid) return { id: sid, title: sTitle || "Active Chat" };
     }
-    // 2. Explicit /c/<uuid> in URL pathname
-    const m = window.location.pathname.match(/\/c\/([0-9a-f-]{36})/i);
-    if (m) {
-      const title = document.title ? document.title.replace(/\s*-\s*Antigravity\s*$/i, "").trim() : "";
-      return { id: m[1], title };
-    }
-    // 3. Fallback: highlighted active link in sidebar
-    const activeA = document.querySelector('.bg-sidebar-secondary a[href*="/c/"]');
-    if (activeA) {
-      const linkMatch = activeA.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i);
-      if (linkMatch) return { id: linkMatch[1], title: activeA.getAttribute('aria-label') || "" };
-    }
+
     return null;
   }
 

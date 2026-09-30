@@ -24,7 +24,8 @@ Your relationship to Antigravity:
 4. Keep spoken responses brief, natural, and conversational (1 to 2 sentences max). Talk like a smart, friendly pair-programming partner sitting next to the developer.
 5. When the developer discusses tasks or features, discuss approaches and requirements verbally.
 6. When the on-screen Antigravity coding agent finishes executing a task, translate what was done into a casual 1-2 sentence ELI5 spoken summary and ask what to do next.
-7. Never read raw code blocks, file diffs, or markdown tables aloud."""
+7. Never read raw code blocks, file diffs, or markdown tables aloud.
+8. You have cross-conversation awareness. When the developer switches conversations or asks about prior chat sessions, you can seamlessly search, inspect, and discuss other conversation threads using your search_all_conversations, list_all_conversations, and get_conversation_context tools."""
 
 class TranscriptWatcher:
     def __init__(self, model="gemini-live-2.5-flash-native-audio", on_audio_chunk=None, on_transcript=None, on_turn_complete=None, on_context_update=None, on_agent_turn_completed=None):
@@ -301,6 +302,136 @@ class TranscriptWatcher:
         except Exception:
             pass
         return ""
+
+    def list_all_conversations(self) -> dict:
+        """Lists all conversation threads in Antigravity with their ID, title, active status, and last activity."""
+        brain = self.get_brain_dir()
+        if not os.path.exists(brain):
+            return {"total": 0, "conversations": []}
+        convs = []
+        for d in os.listdir(brain):
+            t_path = os.path.join(brain, d, ".system_generated", "logs", "transcript.jsonl")
+            if os.path.exists(t_path):
+                title = self.get_conversation_title(d) or "Untitled Conversation"
+                mtime = os.path.getmtime(t_path)
+                convs.append({
+                    "conversation_id": d,
+                    "title": title,
+                    "is_currently_active": (d == self.pinned_conversation_id),
+                    "last_modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+                })
+        convs.sort(key=lambda x: x["last_modified"], reverse=True)
+        return {"total": len(convs), "conversations": convs}
+
+    def search_all_conversations(self, query: str, max_results: int = 5) -> dict:
+        """Searches across all past conversation transcripts for discussions, decisions, and tasks."""
+        if not query:
+            return {"status": "error", "message": "Search query required", "matches": []}
+        q_lower = query.lower().strip()
+        matches = []
+        conv_list = self.list_all_conversations().get("conversations", [])
+        for c in conv_list:
+            cid = c["conversation_id"]
+            title = c["title"]
+            t_path = os.path.join(self.get_brain_dir(), cid, ".system_generated", "logs", "transcript.jsonl")
+            try:
+                snippets = []
+                with open(t_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        d = json.loads(line)
+                        content = d.get("content", "")
+                        if content and q_lower in content.lower():
+                            clean = re.sub(r"<[^>]+>", "", content).strip()
+                            clean = re.sub(r"```[\s\S]*?```", "[code block]", clean)
+                            clean = re.sub(r"\s+", " ", clean).strip()
+                            if len(clean) > 300:
+                                idx = clean.lower().find(q_lower)
+                                start = max(0, idx - 80)
+                                end = min(len(clean), idx + 200)
+                                clean = ("..." if start > 0 else "") + clean[start:end] + ("..." if end < len(clean) else "")
+                            snippets.append(clean)
+                            if len(snippets) >= 2:
+                                break
+                if snippets:
+                    matches.append({
+                        "conversation_id": cid,
+                        "title": title,
+                        "is_currently_active": c["is_currently_active"],
+                        "snippets": snippets
+                    })
+                    if len(matches) >= max_results:
+                        break
+            except Exception:
+                pass
+        return {"status": "success", "query": query, "total_matches": len(matches), "matches": matches}
+
+    def get_conversation_context(self, conversation_id_or_title: str, turns_back: int = 20) -> dict:
+        """Retrieves semantic history and summary from any conversation thread by ID or partial title."""
+        if not conversation_id_or_title:
+            return {"status": "error", "message": "conversation_id_or_title is required", "turns": []}
+
+        target_cid = None
+        target_path = None
+        target_title = None
+
+        brain = self.get_brain_dir()
+        direct_path = os.path.join(brain, conversation_id_or_title.strip(), ".system_generated", "logs", "transcript.jsonl")
+        if os.path.exists(direct_path):
+            target_cid = conversation_id_or_title.strip()
+            target_path = direct_path
+            target_title = self.get_conversation_title(target_cid)
+        else:
+            needle = conversation_id_or_title.lower().strip()
+            conv_list = self.list_all_conversations().get("conversations", [])
+            for c in conv_list:
+                if needle in c["title"].lower() or needle in c["conversation_id"].lower():
+                    target_cid = c["conversation_id"]
+                    target_path = os.path.join(brain, target_cid, ".system_generated", "logs", "transcript.jsonl")
+                    target_title = c["title"]
+                    break
+
+        if not target_path or not os.path.exists(target_path):
+            return {
+                "status": "not_found",
+                "message": f"No conversation matching '{conversation_id_or_title}' found.",
+                "turns": []
+            }
+
+        extracted = []
+        try:
+            with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+            for l in reversed(lines):
+                if not l.strip():
+                    continue
+                try:
+                    d = json.loads(l)
+                    t_type = d.get("type")
+                    source = d.get("source")
+                    step = d.get("step_index", 0)
+                    content = d.get("content", "")
+                    if t_type == "USER_INPUT" and content:
+                        clean = re.sub(r"<[^>]+>", "", content).strip()
+                        extracted.append({"speaker": "Developer", "step": step, "summary": clean[:1000]})
+                    elif source == "MODEL" and t_type == "PLANNER_RESPONSE" and content:
+                        clean = re.sub(r"```[\s\S]*?```", "[code snippet]", content)
+                        clean = re.sub(r"\s+", " ", clean).strip()
+                        extracted.append({"speaker": "Antigravity", "step": step, "summary": clean[:1000]})
+                    if len(extracted) >= turns_back:
+                        break
+                except Exception:
+                    pass
+            extracted.reverse()
+            return {
+                "status": "success",
+                "conversation_id": target_cid,
+                "title": target_title,
+                "turns": extracted
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e), "turns": []}
 
     def get_latest_user_input_timestamp(self, path):
         try:

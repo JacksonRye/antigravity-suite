@@ -236,6 +236,46 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                         )
                     }
                 )
+            ),
+            types.FunctionDeclaration(
+                name="list_all_conversations",
+                description="Lists all current and past conversation threads in Antigravity with their titles, IDs, active status, and last activity time. Call this whenever the user asks what other conversations exist or wants an overview of previous sessions.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={}
+                )
+            ),
+            types.FunctionDeclaration(
+                name="search_all_conversations",
+                description="Searches across ALL conversation threads and past chat sessions for specific topics, decisions, code discussions, or prior tasks. Call this whenever the developer asks about what happened or was discussed in another conversation.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    required=["query"],
+                    properties={
+                        "query": types.Schema(
+                            type=types.Type.STRING,
+                            description="The keyword, topic, or search term to look for across all conversation histories."
+                        )
+                    }
+                )
+            ),
+            types.FunctionDeclaration(
+                name="get_conversation_context",
+                description="Retrieves the detailed discussion and transcript turns of any specified conversation thread by ID or partial title. Call this to dive deeper into a past conversation found via list_all_conversations or search_all_conversations.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    required=["conversation_id_or_title"],
+                    properties={
+                        "conversation_id_or_title": types.Schema(
+                            type=types.Type.STRING,
+                            description="The UUID or title of the conversation to inspect."
+                        ),
+                        "turns_back": types.Schema(
+                            type=types.Type.INTEGER,
+                            description="Number of past turns to retrieve (defaults to 20)."
+                        )
+                    }
+                )
             )
         ]
     )
@@ -292,6 +332,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         tools=[chat_tools],
         tool_mapping={
             "get_active_chat_context": watcher.get_active_chat_context,
+            "list_all_conversations": watcher.list_all_conversations,
+            "search_all_conversations": watcher.search_all_conversations,
+            "get_conversation_context": watcher.get_conversation_context,
             "write_to_chat": dispatch_write_to_chat,
             "search_web": search_web,
             "remember_fact": remember_fact,

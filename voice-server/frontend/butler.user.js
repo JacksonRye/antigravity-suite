@@ -295,24 +295,43 @@
     };
   }
 
-  // Active Tab & Chat Identification
-  function detectActiveConvId() {
-    const m = window.location.pathname.match(/\/c\/([0-9a-f-]{36})/i) || window.location.href.match(/([0-9a-f-]{36})/i);
-    return m ? m[1] : "";
+  // Active Conversation Identification
+  function detectActiveConv() {
+    // 1. Selected conversation row in sidebar (most accurate in Antigravity)
+    const selectedRow = document.querySelector('[data-testid="conversation-row-sidebar"][data-selected="true"]');
+    if (selectedRow) {
+      const cid = selectedRow.getAttribute('data-cascade-id') || selectedRow.querySelector('a')?.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i)?.[1];
+      const title = selectedRow.querySelector('span')?.innerText?.trim() || selectedRow.querySelector('a')?.getAttribute('aria-label') || "";
+      if (cid) return { id: cid, title };
+    }
+    // 2. Explicit /c/<uuid> in URL pathname
+    const m = window.location.pathname.match(/\/c\/([0-9a-f-]{36})/i);
+    if (m) {
+      const title = document.title ? document.title.replace(/\s*-\s*Antigravity\s*$/i, "").trim() : "";
+      return { id: m[1], title };
+    }
+    // 3. Fallback: highlighted active link in sidebar
+    const activeA = document.querySelector('.bg-sidebar-secondary a[href*="/c/"]');
+    if (activeA) {
+      const linkMatch = activeA.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i);
+      if (linkMatch) return { id: linkMatch[1], title: activeA.getAttribute('aria-label') || "" };
+    }
+    return null;
   }
 
-  // Silent Context Sync (No audible interruption)
+  // Silent Context Sync across conversation switches
   function syncActiveChat(force = false) {
-    const cid = detectActiveConvId();
-    if (cid && (cid !== currentConvId || force)) {
-      currentConvId = cid;
-      log("Silent sync to chat: " + cid.slice(0, 8) + "...", "#10b981");
-      statusBadge.textContent = "Chat: " + cid.slice(0, 8);
+    const conv = detectActiveConv();
+    if (conv && conv.id && (conv.id !== currentConvId || force)) {
+      currentConvId = conv.id;
+      const title = conv.title || "Chat";
+      log("Switched to conversation: " + title.slice(0, 24), "#10b981");
+      statusBadge.textContent = title.slice(0, 16);
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({
           type: "set_active_conversation",
-          conversation_id: cid,
-          title: document.title,
+          conversation_id: conv.id,
+          title: title,
         }));
       }
     }
@@ -573,6 +592,13 @@
     syncActiveChat();
   };
   window.addEventListener("popstate", () => syncActiveChat());
+  // Listen for clicks on conversation items in the sidebar for instant sync
+  document.addEventListener("click", (e) => {
+    if (e.target.closest('[data-testid="conversation-row-sidebar"], a[href*="/c/"]')) {
+      setTimeout(() => syncActiveChat(true), 150);
+      setTimeout(() => syncActiveChat(true), 600);
+    }
+  });
   setInterval(syncActiveChat, 1000);
 
   // Auto connect

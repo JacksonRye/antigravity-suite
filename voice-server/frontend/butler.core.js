@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Antigravity Voice Butler (Gemini Live)
 // @namespace    https://butler.retake.cloud/
-// @version      2.3.0
+// @version      3.1.0
 // @description  In-Tab Gemini Live Voice Butler with 100% active chat context and direct typing
 // @match        *://*/*
 // @grant        none
@@ -336,29 +336,61 @@
 
   // Find Antigravity Chat Input (Lexical Editor, textarea, or contenteditable)
   function findChatInputElement() {
-    const selectors = [
-      '[data-lexical-editor="true"]',
-      '[contenteditable="true"][aria-label="Message input"]',
-      '[aria-label="Message input"]',
-      '[role="combobox"][contenteditable]',
-      'div[contenteditable="true"]',
-      'div[contenteditable]',
-      'textarea[aria-label="Message input"]',
-      'textarea'
-    ];
-    for (const sel of selectors) {
-      const found = document.querySelector(sel);
-      if (found && !document.getElementById("ag-butler-in-tab-root")?.contains(found)) {
-        return found;
+    // 1. Direct active or focused editable element
+    if (document.activeElement && (document.activeElement.isContentEditable || document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT")) {
+      if (!document.getElementById("ag-butler-in-tab-root")?.contains(document.activeElement)) {
+        return document.activeElement;
       }
     }
+
+    // 2. High priority selectors
+    const selectors = [
+      '[data-lexical-editor="true"]',
+      'div[contenteditable="true"][aria-label="Message input"]',
+      'div[contenteditable="true"]',
+      '[contenteditable="true"]',
+      '[aria-label="Message input"]',
+      'textarea[aria-label="Message input"]',
+      'textarea',
+      '[role="textbox"]',
+      '[role="combobox"]',
+      'div[contenteditable]'
+    ];
+    for (const sel of selectors) {
+      try {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+          if (!document.getElementById("ag-butler-in-tab-root")?.contains(el)) {
+            return el;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Search near "Ask anything" placeholder
     const all = document.querySelectorAll('*');
+    for (let i = 0; i < all.length; i++) {
+      const node = all[i];
+      if (document.getElementById("ag-butler-in-tab-root")?.contains(node)) continue;
+      const text = (node.textContent || "").trim();
+      const placeholder = (node.getAttribute('placeholder') || node.getAttribute('data-placeholder') || "").trim();
+      if (text.includes("Ask anything") || placeholder.includes("Ask anything")) {
+        const parent = node.closest('div[class*="rounded"], form, [role="region"]') || node.parentElement;
+        if (parent) {
+          const editable = parent.querySelector('[contenteditable], textarea, input');
+          if (editable) return editable;
+        }
+      }
+    }
+
+    // 4. Any element with isContentEditable in document
     for (let i = 0; i < all.length; i++) {
       const el = all[i];
       if (el.isContentEditable && !document.getElementById("ag-butler-in-tab-root")?.contains(el)) {
         return el;
       }
     }
+
     return null;
   }
 
@@ -368,7 +400,7 @@
     const el = findChatInputElement();
 
     if (!el) {
-      log("[Input element not found in DOM; signaling VPS fallback...]", "#f59e0b");
+      log("[Input element not found in DOM]", "#ef4444");
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({
           type: "client_write_failed",
@@ -381,25 +413,28 @@
     }
 
     el.focus();
-    if (el.tagName.toLowerCase() === "textarea") {
+    try { el.click(); } catch (_) {}
+
+    if (el.tagName.toLowerCase() === "textarea" || el.tagName.toLowerCase() === "input") {
       el.value = prompt;
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
+      let ok = false;
       try {
         const sel = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(el);
         sel.removeAllRanges();
         sel.addRange(range);
-        document.execCommand("delete", false, null);
-        document.execCommand("insertText", false, prompt);
+        ok = document.execCommand("insertText", false, prompt);
       } catch (_) {}
 
-      if (!el.textContent || el.textContent.trim() === "") {
+      if (!ok || !el.textContent || el.textContent.trim() === "") {
         el.innerHTML = `<p dir="auto"><span data-lexical-text="true">${prompt}</span></p>`;
       }
       el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
@@ -411,6 +446,7 @@
         submit: submit,
       }));
     }
+    log("[Drafted into chat input]", "#10b981");
 
     if (submit) {
       setTimeout(() => {
@@ -441,7 +477,7 @@
           el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
           log("[Dispatched Enter key submission]", "#10b981");
         }
-      }, 150);
+      }, 250);
     }
   }
 
@@ -476,6 +512,21 @@
               log("[Tool: " + m.name + "]", "#f59e0b");
             } else if (m.type === "client_write_to_chat") {
               writeToCurrentChat(m.prompt, m.submit);
+            } else if (m.type === "client_navigate_to_conv") {
+              log("[Switching view to " + (m.title || m.conversation_id) + "...]", "#38bdf8");
+              const row = document.querySelector(`[data-cascade-id="${m.conversation_id}"], a[href*="${m.conversation_id}"]`);
+              if (row) {
+                row.click();
+                log("[Navigated to " + (m.title || m.conversation_id) + "]", "#10b981");
+              } else {
+                try {
+                  history.pushState(null, "", `/c/${m.conversation_id}`);
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                  syncActiveChat(true);
+                } catch (_) {
+                  window.location.href = `/c/${m.conversation_id}`;
+                }
+              }
             } else if (m.type === "interrupted") {
               log("[Interrupted]", "#94a3b8");
               stopPlayback();

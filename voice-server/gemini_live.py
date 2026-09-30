@@ -68,6 +68,7 @@ class GeminiLive:
    - Set submit=False if the developer says "type", "draft", "write", or wants to review it first.
    - Always formulate a clear, actionable prompt tailored for the coding agent.
    - When confirming verbally, state what you drafted or submitted in one crisp sentence (e.g., 'I've typed out the prompt to refactor the database and submitted it to the agent.').
+   - NEVER tell the developer you sent or typed a message unless the write_to_chat tool returns success: true. If it fails, report the error honestly.
 10. You have your own live WEB SEARCH tool: search_web.
    - When the developer asks you to search the web, lookup live information, find documentation, check library releases, or look something up online, call your own search_web tool directly.
    - Do NOT delegate web searches to Antigravity chat via write_to_chat unless the developer explicitly asks the coding agent in the chat to research something for a workspace code edit. Call search_web yourself and answer the developer verbally with the fresh findings.
@@ -80,7 +81,11 @@ class GeminiLive:
 13. Seamless Continuation & Tab Switch Resumption:
    - When switching conversations or when an explanation was interrupted, you will receive explicit continuation instructions via system context.
    - If the developer asks you to continue, says 'continue', 'what were you saying?', or asks to resume while back on the tab where the explanation originated, begin naturally with: "As I was saying," and seamlessly continue explaining the remaining portion without restarting from the beginning.
-   - If the developer asks you to continue or resume while on a DIFFERENT tab from where the interrupted explanation started, do NOT continue the old explanation directly. State what you were explaining in the previous chat and what you are working on in the current chat, and ask which one they would like to discuss, exactly as instructed by the system directive."""
+   - If the developer asks you to continue or resume while on a DIFFERENT tab from where the interrupted explanation started, do NOT continue the old explanation directly. State what you were explaining in the previous chat and what you are working on in the current chat, and ask which one they would like to discuss, exactly as instructed by the system directive.
+14. Cross-Conversation & Hands-Free Project Navigation:
+   - You have full tools to explore, search, and navigate across all conversations: list_all_conversations, switch_active_conversation, search_all_conversations, and get_conversation_context.
+   - When the developer asks what chats or projects exist (e.g. 'what conversations do we have?', 'list projects'), call list_all_conversations and read out the real project and conversation titles (e.g., Alter Ego, The Female, Patching Antigravity).
+   - When the developer asks to switch chats (e.g. 'Switch to Alter Ego', 'Take me to The Female', 'Switch to Patching Antigravity'), call switch_active_conversation immediately. This switches your voice memory and automatically navigates their iPad screen to that conversation!"""
 
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],

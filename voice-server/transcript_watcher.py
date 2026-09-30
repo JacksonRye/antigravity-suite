@@ -275,10 +275,34 @@ class TranscriptWatcher:
             logger.error(f"Error extracting execution context: {e}")
             return {"user_goal": "", "actions": [], "files_touched": [], "walkthrough": ""}
 
+    def get_sidebar_titles(self) -> dict[str, str]:
+        """Reads official conversation titles directly from Antigravity's conversation_summaries.db."""
+        db_path = os.path.expanduser("~/.gemini/antigravity/conversation_summaries.db")
+        if not os.path.exists(db_path):
+            return {}
+        res = {}
+        try:
+            conn = sqlite3.connect(db_path, timeout=2.0)
+            c = conn.cursor()
+            c.execute("SELECT conversation_id, title FROM conversation_summaries")
+            for cid, title in c.fetchall():
+                if cid and title:
+                    res[str(cid).strip()] = str(title).strip()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Error reading conversation_summaries.db: {e}")
+        return res
+
     def get_conversation_title(self, conv_id: str) -> str:
-        """Derives a human-readable title for a conversation by checking its initial user prompt."""
+        """Derives a human-readable title for a conversation."""
         if not conv_id:
             return ""
+        # 1. Primary: Official sidebar title
+        sidebar = self.get_sidebar_titles()
+        if conv_id in sidebar and sidebar[conv_id]:
+            return sidebar[conv_id]
+
+        # 2. Fallback: Check initial user prompt
         candidate = os.path.join(self.get_brain_dir(), conv_id, ".system_generated", "logs", "transcript.jsonl")
         if not os.path.exists(candidate):
             return ""

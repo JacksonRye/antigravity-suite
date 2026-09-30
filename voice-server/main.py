@@ -322,14 +322,14 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             except Exception as e:
                 logger.warning(f"Could not dispatch to client ws: {e}")
 
-        # 2. Wait for client confirmation or immediately fallback to server CDP
+        # 2. Wait for client confirmation or fallback to server CDP
         client_confirmed = False
         if client_dispatched:
             try:
-                await asyncio.wait_for(last_write_event.wait(), timeout=0.5)
+                await asyncio.wait_for(last_write_event.wait(), timeout=1.5)
                 client_confirmed = last_write_success[0]
             except asyncio.TimeoutError:
-                logger.info("Client in-tab write unconfirmed after 500ms; falling back to VPS CDP.")
+                logger.info("Client in-tab write unconfirmed after 1.5s; attempting VPS CDP fallback.")
 
         if not client_confirmed:
             logger.info("Client in-tab write unconfirmed or failed; executing server CDP fallback...")
@@ -339,14 +339,34 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             logger.info("In-tab client confirmed successful DOM typing; skipping CDP.")
             cdp_res = {"status": "skipped", "reason": "in_tab_client_confirmed"}
 
+        overall_success = client_confirmed or (cdp_res.get("success") if isinstance(cdp_res, dict) else False)
         return {
-            "success": True,
+            "success": bool(overall_success),
             "client_dispatched": client_dispatched,
             "client_confirmed": client_confirmed,
             "cdp": cdp_res,
             "prompt": prompt,
             "submit": submit,
+            "error": None if overall_success else "Input element could not be found or typed into on active browser tab"
         }
+
+    async def dispatch_switch_active_conversation(conversation_name_or_id: str):
+        logger.info(f"dispatch_switch_active_conversation called: '{conversation_name_or_id}'")
+        res = watcher.switch_active_conversation(conversation_name_or_id)
+        if res.get("status") == "success":
+            cid = res.get("conversation_id")
+            title = res.get("title")
+            for ws in list(connected_clients):
+                try:
+                    await ws.send_json({
+                        "type": "client_navigate_to_conv",
+                        "conversation_id": cid,
+                        "title": title,
+                    })
+                    logger.info(f"Dispatched client_navigate_to_conv to tab: {title} ({cid})")
+                except Exception as e:
+                    logger.warning(f"Could not send client_navigate_to_conv to client: {e}")
+        return res
 
     gemini_client = GeminiLive(
         api_key=GEMINI_API_KEY,
@@ -358,7 +378,7 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             "list_all_conversations": watcher.list_all_conversations,
             "search_all_conversations": watcher.search_all_conversations,
             "get_conversation_context": watcher.get_conversation_context,
-            "switch_active_conversation": watcher.switch_active_conversation,
+            "switch_active_conversation": dispatch_switch_active_conversation,
             "write_to_chat": dispatch_write_to_chat,
             "search_web": search_web,
             "remember_fact": remember_fact,

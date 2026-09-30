@@ -9,9 +9,10 @@
 // ==/UserScript==
 
 (() => {
-  // Prevent duplicate execution
-  if (window.__antigravityButlerUserscriptLoaded) return;
-  window.__antigravityButlerUserscriptLoaded = true;
+  // Clean up any old Butler instance before mounting the latest version
+  if (window.__antigravityButlerCleanup) {
+    try { window.__antigravityButlerCleanup(); } catch (_) {}
+  }
 
   const SERVER_WS_URL = "wss://butler.retake.cloud/ws";
   let ws = null;
@@ -597,6 +598,15 @@
     }
   });
   setInterval(syncActiveChat, 1000);
+
+  // Cleanup hook for future updates
+  window.__antigravityButlerCleanup = () => {
+    try { if (ws) ws.close(); } catch (_) {}
+    try { stopMic(); } catch (_) {}
+    try { if (audioCtx) audioCtx.close(); } catch (_) {}
+    const r = document.getElementById("ag-butler-in-tab-root");
+    if (r) r.remove();
+  };
 
   // Auto connect
   connectWs();

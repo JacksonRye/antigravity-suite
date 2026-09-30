@@ -352,7 +352,15 @@
     const el = findChatInputElement();
 
     if (!el) {
-      log("[Error: Input element not found in DOM]", "#ef4444");
+      log("[Input element not found in DOM; signaling VPS fallback...]", "#f59e0b");
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: "client_write_failed",
+          error: "Input element not found in DOM",
+          prompt: prompt,
+          submit: submit,
+        }));
+      }
       return;
     }
 
@@ -377,6 +385,15 @@
       }
       el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    // Signal in-tab success to server
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: "client_write_success",
+        prompt: prompt,
+        submit: submit,
+      }));
     }
 
     if (submit) {

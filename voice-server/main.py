@@ -157,6 +157,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     text_input_queue = asyncio.Queue()
     active_text_queues.add(text_input_queue)
 
+    last_write_event = asyncio.Event()
+    last_write_success = [False]
+
     async def audio_output_callback(data):
         watcher.is_speaking = True
         await websocket.send_bytes(data)
@@ -240,6 +243,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     async def dispatch_write_to_chat(prompt: str, submit: bool = False):
         logger.info(f"dispatch_write_to_chat called: {prompt[:60]}... (submit={submit})")
         client_dispatched = False
+        last_write_event.clear()
+        last_write_success[0] = False
+
         # 1. Primary: Direct in-tab typing on the connected client's browser DOM
         for ws in list(connected_clients):
             try:
@@ -253,18 +259,27 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             except Exception as e:
                 logger.warning(f"Could not dispatch to client ws: {e}")
 
-        # 2. Server-side CDP target alignment (fallback only if no in-tab client handled it)
-        if not client_dispatched:
-            logger.info("No in-tab client connected; executing server CDP write_to_chat fallback...")
+        # 2. Wait for client confirmation or immediately fallback to server CDP
+        client_confirmed = False
+        if client_dispatched:
+            try:
+                await asyncio.wait_for(last_write_event.wait(), timeout=0.5)
+                client_confirmed = last_write_success[0]
+            except asyncio.TimeoutError:
+                logger.info("Client in-tab write unconfirmed after 500ms; falling back to VPS CDP.")
+
+        if not client_confirmed:
+            logger.info("Client in-tab write unconfirmed or failed; executing server CDP fallback...")
             pinned = watcher.pinned_conversation_id
             cdp_res = await chat_controller.write_to_chat(prompt, submit, target_conv_id=pinned)
         else:
-            logger.info("In-tab client handled writing directly into DOM; skipping CDP.")
-            cdp_res = {"status": "skipped", "reason": "in_tab_client_handled"}
+            logger.info("In-tab client confirmed successful DOM typing; skipping CDP.")
+            cdp_res = {"status": "skipped", "reason": "in_tab_client_confirmed"}
 
         return {
             "success": True,
             "client_dispatched": client_dispatched,
+            "client_confirmed": client_confirmed,
             "cdp": cdp_res,
             "prompt": prompt,
             "submit": submit,
@@ -318,6 +333,16 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                                 title = payload.get("title", "")
                                 logger.info(f"Client requested pin to active conversation: {conv_id} ({title})")
                                 watcher.set_active_conversation(conv_id, title=title)
+                                continue
+                            elif payload.get("type") == "client_write_success":
+                                logger.info("In-tab client confirmed successful write!")
+                                last_write_success[0] = True
+                                last_write_event.set()
+                                continue
+                            elif payload.get("type") == "client_write_failed":
+                                logger.warning(f"In-tab client reported write failure: {payload.get('error')}")
+                                last_write_success[0] = False
+                                last_write_event.set()
                                 continue
                             elif "text" in payload and isinstance(payload["text"], str):
                                 text = payload["text"]

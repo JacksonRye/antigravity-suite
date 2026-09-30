@@ -124,6 +124,15 @@ async def serve_userscript():
     )
 
 
+@app.get("/butler.core.js")
+async def serve_core_script():
+    return FileResponse(
+        "frontend/butler.core.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+    )
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None = None):
     """WebSocket endpoint for Gemini Live."""
@@ -276,6 +285,20 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                         )
                     }
                 )
+            ),
+            types.FunctionDeclaration(
+                name="switch_active_conversation",
+                description="Switches Puck's active conversation focus to any project or chat by name (e.g. 'Alter Ego', 'spokenly-bridge', 'CLI Project') or ID. Call this whenever the user asks to switch chats, mentions another project, or asks what is happening in a different conversation.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    required=["conversation_name_or_id"],
+                    properties={
+                        "conversation_name_or_id": types.Schema(
+                            type=types.Type.STRING,
+                            description="The name or title of the project or chat (e.g. 'Alter Ego')."
+                        )
+                    }
+                )
             )
         ]
     )
@@ -335,6 +358,7 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             "list_all_conversations": watcher.list_all_conversations,
             "search_all_conversations": watcher.search_all_conversations,
             "get_conversation_context": watcher.get_conversation_context,
+            "switch_active_conversation": watcher.switch_active_conversation,
             "write_to_chat": dispatch_write_to_chat,
             "search_web": search_web,
             "remember_fact": remember_fact,

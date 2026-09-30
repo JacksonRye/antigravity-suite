@@ -433,6 +433,67 @@ class TranscriptWatcher:
         except Exception as e:
             return {"status": "error", "message": str(e), "turns": []}
 
+    def switch_active_conversation(self, conversation_name_or_id: str) -> dict:
+        """Switches Butler's active conversation to the requested chat/project by title, project name, or ID."""
+        if not conversation_name_or_id:
+            return {"status": "error", "message": "Conversation name or ID is required"}
+
+        target_cid = None
+        target_path = None
+        target_title = None
+
+        brain = self.get_brain_dir()
+        direct_path = os.path.join(brain, conversation_name_or_id.strip(), ".system_generated", "logs", "transcript.jsonl")
+        if os.path.exists(direct_path):
+            target_cid = conversation_name_or_id.strip()
+            target_path = direct_path
+            target_title = self.get_conversation_title(target_cid)
+        else:
+            needle = conversation_name_or_id.lower().strip()
+            conv_list = self.list_all_conversations().get("conversations", [])
+            for c in conv_list:
+                if needle in c["title"].lower() or needle in c["conversation_id"].lower():
+                    target_cid = c["conversation_id"]
+                    target_path = os.path.join(brain, target_cid, ".system_generated", "logs", "transcript.jsonl")
+                    target_title = c["title"]
+                    break
+
+        if not target_path or not os.path.exists(target_path):
+            # Check SQLite conversations for title or project name
+            convs_dir = os.path.expanduser("~/.gemini/antigravity/conversations")
+            if os.path.exists(convs_dir):
+                for f in os.listdir(convs_dir):
+                    if f.endswith(".db"):
+                        cid = f[:-3]
+                        cand = os.path.join(brain, cid, ".system_generated", "logs", "transcript.jsonl")
+                        if os.path.exists(cand):
+                            title = self.get_conversation_title(cid)
+                            if needle in title.lower():
+                                target_cid = cid
+                                target_path = cand
+                                target_title = title
+                                break
+
+        if not target_path or not os.path.exists(target_path):
+            available = [c["title"] for c in self.list_all_conversations().get("conversations", [])[:5]]
+            return {
+                "status": "not_found",
+                "message": f"Could not find conversation matching '{conversation_name_or_id}'. Available conversations: {available}"
+            }
+
+        logger.info(f"Butler switching active conversation to: {target_cid} ('{target_title}')")
+        self.pinned_conversation_id = target_cid
+        self.switch_to_conversation(target_path, conv_id=target_cid, title=target_title)
+
+        summary = self.get_rolling_summary(target_path, max_turns=5)
+        return {
+            "status": "success",
+            "conversation_id": target_cid,
+            "title": target_title,
+            "message": f"Successfully switched context to '{target_title}'.",
+            "recent_context": summary
+        }
+
     def get_latest_user_input_timestamp(self, path):
         try:
             size = os.path.getsize(path)

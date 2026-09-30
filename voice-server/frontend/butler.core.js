@@ -39,10 +39,6 @@
     box.scrollTop = box.scrollHeight;
   }
 
-  window.addEventListener("error", (e) => {
-    log("Error: " + (e.message || e), "#ef4444");
-  });
-
   // UI Setup: Floating Orb + Collapsible Console
   const root = document.createElement("div");
   root.id = "ag-butler-in-tab-root";

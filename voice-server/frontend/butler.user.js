@@ -8,18 +8,11 @@
 // @run-at       document-end
 // ==/UserScript==
 
-(async () => {
-  if (window.__antigravityButlerLoaded) return;
-  window.__antigravityButlerLoaded = true;
-
-  try {
-    const res = await fetch("https://butler.retake.cloud/butler.core.js?t=" + Date.now(), {
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error("Failed to load core: " + res.status);
-    const code = await res.text();
-    (new Function(code))();
-  } catch (err) {
-    console.error("[Antigravity Butler Auto-Loader]", err);
-  }
+(() => {
+  const old = document.getElementById("ag-butler-core-script");
+  if (old) old.remove();
+  const s = document.createElement("script");
+  s.id = "ag-butler-core-script";
+  s.src = "https://butler.retake.cloud/butler.core.js?t=" + Date.now();
+  document.head.appendChild(s);
 })();

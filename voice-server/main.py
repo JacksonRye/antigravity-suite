@@ -343,10 +343,17 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
 
     # Initialize conversation context
     try:
+        valid_candidate = False
         if conversation_id:
-            logger.info(f"Connection query specified conversation_id: {conversation_id}")
-            watcher.set_active_conversation(conversation_id, force=True)
-        else:
+            cand_path = os.path.join(watcher.get_brain_dir(), conversation_id, ".system_generated", "logs", "transcript.jsonl")
+            if os.path.exists(cand_path):
+                logger.info(f"Connection query specified valid conversation_id: {conversation_id}")
+                watcher.set_active_conversation(conversation_id, force=True)
+                valid_candidate = True
+            else:
+                logger.warning(f"Ignored invalid/non-existent query conversation_id: {conversation_id}")
+
+        if not valid_candidate:
             active = watcher.find_active_conversation()
             if active:
                 watcher.switch_to_conversation(active)
@@ -374,8 +381,12 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                             elif payload.get("type") == "set_active_conversation":
                                 conv_id = payload.get("conversation_id")
                                 title = payload.get("title", "")
-                                logger.info(f"Client requested pin to active conversation: {conv_id} ({title})")
-                                watcher.set_active_conversation(conv_id, title=title)
+                                cand_path = os.path.join(watcher.get_brain_dir(), str(conv_id), ".system_generated", "logs", "transcript.jsonl")
+                                if os.path.exists(cand_path):
+                                    logger.info(f"Client requested pin to active conversation: {conv_id} ({title})")
+                                    watcher.set_active_conversation(conv_id, title=title)
+                                else:
+                                    logger.warning(f"Ignored client pin to non-existent conversation: {conv_id} ({title})")
                                 continue
                             elif payload.get("type") == "client_write_success":
                                 logger.info("In-tab client confirmed successful write!")

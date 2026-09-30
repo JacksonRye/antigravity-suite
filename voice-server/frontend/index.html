@@ -354,6 +354,26 @@
   </header>
 
   <main>
+    <div style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.25), rgba(56, 189, 248, 0.15)); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 14px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+      <div>
+        <div style="font-size: 14px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+          <span>📲</span>
+          <span>In-Tab Butler for iPad Safari</span>
+        </div>
+        <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">
+          Runs directly inside Antigravity with 100% chat context & direct in-tab typing.
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <a href="/butler.user.js" style="background: #4f46e5; color: #fff; text-decoration: none; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4); display: inline-flex; align-items: center; gap: 5px;">
+          <span>⚡ Install Userscript</span>
+        </a>
+        <button id="copyScriptBtn" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; padding: 8px 14px; border-radius: 20px; font-size: 12px; cursor: pointer;">
+          📋 Copy Code
+        </button>
+      </div>
+    </div>
+
     <div class="sync-banner" id="syncBanner">
       <div class="sync-title">
         <span>⚡ Pinned IDE Chat:</span>
@@ -414,6 +434,21 @@
       const clearFeedBtn = document.getElementById("clearFeedBtn");
       const vadChip = document.getElementById("vadChip");
       const interruptChip = document.getElementById("interruptChip");
+      const copyScriptBtn = document.getElementById("copyScriptBtn");
+
+      if (copyScriptBtn) {
+        copyScriptBtn.onclick = async () => {
+          try {
+            const res = await fetch("/butler.user.js");
+            const code = await res.text();
+            await navigator.clipboard.writeText(code);
+            copyScriptBtn.textContent = "✅ Copied!";
+            setTimeout(() => { copyScriptBtn.textContent = "📋 Copy Code"; }, 2000);
+          } catch (_) {
+            window.location.href = "/butler.user.js";
+          }
+        };
+      }
 
       vadChip.onclick = () => {
         handsFree = !handsFree;

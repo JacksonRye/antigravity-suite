@@ -115,6 +115,11 @@ async def root():
     return FileResponse("frontend/index.html")
 
 
+@app.get("/butler.user.js")
+async def serve_userscript():
+    return FileResponse("frontend/butler.user.js", media_type="text/javascript")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None = None):
     """WebSocket endpoint for Gemini Live."""

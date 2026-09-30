@@ -131,6 +131,18 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     connected_clients.add(websocket)
     logger.info(f"WebSocket connection accepted (active clients: {len(connected_clients)})")
 
+    # Send current active conversation details to newly connected client
+    try:
+        cur_id = watcher.pinned_conversation_id or (watcher.current_path.split(os.sep)[-4] if watcher.current_path else "")
+        cur_title = watcher.current_title or watcher.get_conversation_title(cur_id) or "Active Antigravity Session"
+        await websocket.send_json({
+            "type": "active_conversation_updated",
+            "conversation_id": cur_id,
+            "title": cur_title,
+        })
+    except Exception as e:
+        logger.warning(f"Could not send active_conversation_updated: {e}")
+
     audio_input_queue = asyncio.Queue()
     video_input_queue = asyncio.Queue()
     text_input_queue = asyncio.Queue()

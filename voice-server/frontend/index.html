@@ -1,99 +1,657 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gemini Live API Demo</title>
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body>
-    <div class="container">
-      <header>
-        <h1>Gemini Live API Demo</h1>
-        <div style="display: flex; gap: 10px; align-items: center">
-          <div id="status" class="status disconnected">Disconnected</div>
-          <div id="interaction-status" class="interaction-status hidden"></div>
-        </div>
-      </header>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Voice Butler" />
+  <meta name="theme-color" content="#090d16" />
+  <title>Antigravity Voice Butler</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background: #090d16;
+      color: #f8fafc;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+    /* Ambient glow backgrounds */
+    .ambient-glow-1 {
+      position: absolute;
+      top: -10%;
+      left: 20%;
+      width: 50vw;
+      height: 50vw;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+      filter: blur(80px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .ambient-glow-2 {
+      position: absolute;
+      bottom: -10%;
+      right: 15%;
+      width: 60vw;
+      height: 60vw;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.12) 0%, transparent 70%);
+      filter: blur(90px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    /* Top Header */
+    header {
+      position: relative;
+      z-index: 10;
+      padding: 16px 20px;
+      padding-top: max(16px, env(safe-area-inset-top));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .logo-area {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #6366f1, #38bdf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+    }
+    .logo-icon svg {
+      width: 20px;
+      height: 20px;
+      color: white;
+    }
+    .logo-text h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .logo-text span {
+      font-size: 11px;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      font-weight: 500;
+      color: #cbd5e1;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f59e0b;
+      box-shadow: 0 0 8px #f59e0b;
+    }
+    .status-dot.live {
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+    }
+    .status-dot.error {
+      background: #ef4444;
+      box-shadow: 0 0 10px #ef4444;
+    }
+    /* Main Content Layout */
+    main {
+      position: relative;
+      z-index: 10;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 16px 20px;
+      gap: 16px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    /* Sync Info Banner */
+    .sync-banner {
+      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    .sync-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sync-title strong {
+      color: #38bdf8;
+    }
+    /* Feed Section */
+    .feed-container {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 16px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .feed-header {
+      padding: 10px 16px;
+      background: rgba(30, 41, 59, 0.4);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+    }
+    .feed-messages {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      scroll-behavior: smooth;
+    }
+    .msg-bubble {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      animation: fadeIn 0.2s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .msg-bubble.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #4f46e5, #4338ca);
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+      box-shadow: 0 4px 15px rgba(79, 70, 229, 0.25);
+    }
+    .msg-bubble.puck {
+      align-self: flex-start;
+      background: rgba(30, 41, 59, 0.85);
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom-left-radius: 4px;
+    }
+    .msg-bubble.tool {
+      align-self: center;
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+      font-size: 12px;
+      border-radius: 10px;
+      padding: 6px 14px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .msg-author {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      opacity: 0.7;
+    }
+    /* Orb Interaction Area */
+    .interaction-zone {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 14px 0 24px 0;
+      padding-bottom: max(24px, env(safe-area-inset-bottom));
+      gap: 16px;
+    }
+    /* Central Glowing Orb */
+    .orb-wrapper {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .orb-aura {
+      position: absolute;
+      top: -16px;
+      left: -16px;
+      right: -16px;
+      bottom: -16px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.45) 0%, rgba(56, 189, 248, 0.25) 50%, transparent 75%);
+      filter: blur(14px);
+      transform: scale(1);
+      transition: transform 0.12s ease-out, opacity 0.2s ease;
+      pointer-events: none;
+      animation: pulse 3s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.12); opacity: 1; }
+    }
+    .orb-btn {
+      position: relative;
+      width: 86px;
+      height: 86px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #38bdf8 0%, #6366f1 55%, #4338ca 100%);
+      border: 3px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 10px 30px rgba(99, 102, 241, 0.5), inset 0 2px 6px rgba(255, 255, 255, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 34px;
+      cursor: pointer;
+      outline: none;
+      transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+    }
+    .orb-btn:active {
+      transform: scale(0.92);
+    }
+    .orb-btn.recording {
+      background: radial-gradient(circle at 35% 30%, #f87171 0%, #dc2626 55%, #991b1b 100%);
+      box-shadow: 0 0 35px rgba(220, 38, 38, 0.8), inset 0 2px 6px rgba(255, 255, 255, 0.4);
+      border-color: #fca5a5;
+    }
+    .orb-hint {
+      font-size: 13px;
+      font-weight: 500;
+      color: #94a3b8;
+    }
+    .action-chips {
+      display: flex;
+      gap: 10px;
+    }
+    .chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .chip:active, .chip.active {
+      background: rgba(99, 102, 241, 0.25);
+      border-color: #6366f1;
+      color: #c7d2fe;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-glow-1"></div>
+  <div class="ambient-glow-2"></div>
 
-      <main>
-        <div class="auth-section" id="auth-section">
-          <div
-            class="description-box"
-            style="
-              margin-bottom: 20px;
-              padding: 15px;
-              background: #f5f5f5;
-              border-radius: 8px;
-              text-align: left;
-            "
-          >
-            <h3>Features Enabled:</h3>
-            <ul style="margin: 10px 0 20px 20px">
-              <li>
-                <strong>Native Audio:</strong> Low latency voice interaction
-              </li>
-              <li>
-                <strong>Multilingual:</strong> Speak in different languages
-              </li>
-
-            </ul>
-            <p>
-              <em
-                >Note: When you connect, the app sends a text message to Gemini
-                instructing it to introduce itself and these features.</em
-              >
-            </p>
-          </div>
-          <p>Click below to connect.</p>
-          <button id="connectBtn" class="btn">Connect</button>
-        </div>
-
-        <div class="session-end-section hidden" id="session-end-section">
-          <h2>Session Ended</h2>
-          <button id="restartBtn" class="btn">Start New Session</button>
-        </div>
-
-        <div class="app-section hidden" id="app-section">
-          <div class="app-grid">
-            <div class="left-panel">
-              <div class="video-container">
-                <div id="video-placeholder">Start camera to send video</div>
-                <video id="video-preview" autoplay playsinline muted></video>
-                <canvas id="video-canvas" style="display: none"></canvas>
-              </div>
-
-              <div class="controls">
-                <button id="micBtn" class="btn icon-btn">Start Mic</button>
-                <button id="cameraBtn" class="btn icon-btn">
-                  Start Camera
-                </button>
-                <button id="screenBtn" class="btn icon-btn">
-                  Share Screen
-                </button>
-                <button id="disconnectBtn" class="btn icon-btn danger">
-                  Disconnect
-                </button>
-              </div>
-            </div>
-
-            <div class="right-panel">
-              <div class="chat-log" id="chat-log"></div>
-              <div class="input-area">
-                <input
-                  type="text"
-                  id="textInput"
-                  placeholder="Type a message..."
-                />
-                <button id="sendBtn" class="btn">Send</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
+  <header>
+    <div class="logo-area">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="22"></line>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <h1>Voice Butler</h1>
+        <span>Vertex AI Native Gemini Live (Puck)</span>
+      </div>
     </div>
-    <script src="/static/media-handler.js"></script>
-    <script src="/static/gemini-client.js"></script>
-    <script src="/static/main.js"></script>
-  </body>
+    <div class="status-pill" id="statusPill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="sync-banner" id="syncBanner">
+      <div class="sync-title">
+        <span>⚡ Pinned IDE Chat:</span>
+        <strong id="activeChatTitle">Auto-detecting active session...</strong>
+      </div>
+      <span style="color:#64748b; font-size:11px;">Remote Synced</span>
+    </div>
+
+    <div class="feed-container">
+      <div class="feed-header">
+        <span>Live Dialogue & Tool Activity</span>
+        <span id="clearFeedBtn" style="cursor:pointer; color:#64748b;">Clear</span>
+      </div>
+      <div class="feed-messages" id="feedMessages">
+        <div class="msg-bubble puck">
+          <div class="msg-author">Puck (Butler)</div>
+          Right then! I'm your Antigravity Voice Butler. Tap the orb below whenever you want to chat, pair-program, or tell me to write code directly into your Antigravity chat!
+        </div>
+      </div>
+    </div>
+
+    <div class="interaction-zone">
+      <div class="orb-wrapper" id="orbWrapper">
+        <div class="orb-aura" id="orbAura"></div>
+        <button class="orb-btn" id="orbBtn" title="Tap to talk / mute">
+          🎙️
+        </button>
+      </div>
+      <div class="orb-hint" id="orbHint">Tap the orb to start speaking</div>
+      <div class="action-chips">
+        <button class="chip active" id="vadChip">Hands-Free (Auto-Listen)</button>
+        <button class="chip" id="interruptChip">Interrupt Puck</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      // Audio State
+      let ws = null;
+      let audioCtx = null;
+      let micStream = null;
+      let spNode = null;
+      let isRecording = false;
+      let scheduledSources = [];
+      let nextStartTime = 0;
+      let handsFree = true;
+      let isConnected = false;
+
+      // DOM Elements
+      const orbBtn = document.getElementById("orbBtn");
+      const orbAura = document.getElementById("orbAura");
+      const orbHint = document.getElementById("orbHint");
+      const statusDot = document.getElementById("statusDot");
+      const statusText = document.getElementById("statusText");
+      const feedMessages = document.getElementById("feedMessages");
+      const activeChatTitle = document.getElementById("activeChatTitle");
+      const clearFeedBtn = document.getElementById("clearFeedBtn");
+      const vadChip = document.getElementById("vadChip");
+      const interruptChip = document.getElementById("interruptChip");
+
+      vadChip.onclick = () => {
+        handsFree = !handsFree;
+        vadChip.classList.toggle("active", handsFree);
+      };
+
+      interruptChip.onclick = () => {
+        stopAudioPlayback();
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ text: "[user clicked interrupt]" }));
+        }
+      };
+
+      clearFeedBtn.onclick = () => {
+        feedMessages.innerHTML = "";
+      };
+
+      function addMessage(author, text, type = "puck") {
+        const bubble = document.createElement("div");
+        bubble.className = "msg-bubble " + type;
+        if (type !== "tool") {
+          const auth = document.createElement("div");
+          auth.className = "msg-author";
+          auth.textContent = author;
+          bubble.appendChild(auth);
+        }
+        const span = document.createElement("span");
+        span.textContent = text;
+        bubble.appendChild(span);
+        feedMessages.appendChild(bubble);
+        feedMessages.scrollTop = feedMessages.scrollHeight;
+      }
+
+      // Audio Processing
+      function downsample(b, sR, oR) {
+        if (sR === oR) return b;
+        const r = sR / oR, nL = Math.round(b.length / r), res = new Float32Array(nL);
+        let oRes = 0, oBuf = 0;
+        while (oRes < res.length) {
+          const nOB = Math.round((oRes + 1) * r);
+          let acc = 0, cnt = 0;
+          for (let i = oBuf; i < nOB && i < b.length; i++) { acc += b[i]; cnt++; }
+          res[oRes] = cnt ? acc / cnt : 0; oRes++; oBuf = nOB;
+        }
+        return res;
+      }
+
+      function toInt16(f32) {
+        const buf = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) {
+          buf[i] = Math.min(1, Math.max(-1, f32[i])) * 0x7fff;
+        }
+        return buf.buffer;
+      }
+
+      function stopAudioPlayback() {
+        for (let i = 0; i < scheduledSources.length; i++) {
+          try { scheduledSources[i].stop(); } catch (_) {}
+        }
+        scheduledSources = [];
+        if (audioCtx) nextStartTime = audioCtx.currentTime;
+      }
+
+      function play24kPcm(buf) {
+        if (!audioCtx) return;
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const pcm = new Int16Array(buf);
+        const flt = new Float32Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) flt[i] = pcm[i] / 32768.0;
+        const ab = audioCtx.createBuffer(1, flt.length, 24000);
+        ab.getChannelData(0).set(flt);
+        const src = audioCtx.createBufferSource();
+        src.buffer = ab; src.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        nextStartTime = Math.max(now, nextStartTime);
+        src.start(nextStartTime);
+        nextStartTime += ab.duration;
+        scheduledSources.push(src);
+
+        // Visual bounce
+        orbAura.style.transform = "scale(1.25)";
+        setTimeout(() => { orbAura.style.transform = "scale(1)"; }, 120);
+
+        src.onended = () => {
+          const idx = scheduledSources.indexOf(src);
+          if (idx > -1) scheduledSources.splice(idx, 1);
+        };
+      }
+
+      // WebSocket Connection
+      function connectWs() {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = proto + "//" + location.host + "/ws";
+        statusText.textContent = "Connecting...";
+        statusDot.className = "status-dot";
+
+        try {
+          ws = new WebSocket(wsUrl);
+          ws.binaryType = "arraybuffer";
+
+          ws.onopen = () => {
+            isConnected = true;
+            statusDot.className = "status-dot live";
+            statusText.textContent = "Butler Live Ready";
+            orbHint.textContent = "Tap orb to speak with Puck";
+          };
+
+          ws.onmessage = async (e) => {
+            if (typeof e.data === "string") {
+              try {
+                const m = JSON.parse(e.data);
+                if (m.type === "active_conversation_updated") {
+                  activeChatTitle.textContent = m.title || m.conversation_id || "Active Chat";
+                } else if (m.type === "gemini") {
+                  addMessage("Puck", m.text, "puck");
+                } else if (m.type === "user") {
+                  addMessage("You", m.text, "user");
+                } else if (m.type === "tool_start") {
+                  addMessage("Action", "⚡ " + m.name + " (" + (m.args?.prompt?.slice(0, 40) || "") + "...)", "tool");
+                } else if (m.type === "interrupted") {
+                  stopAudioPlayback();
+                  addMessage("System", "Interrupted", "tool");
+                } else if (m.type === "turn_complete") {
+                  if (handsFree && !isRecording) {
+                    setTimeout(() => {
+                      if (!isRecording && scheduledSources.length === 0) startMic();
+                    }, 400);
+                  }
+                }
+              } catch (_) {}
+            } else {
+              let raw = e.data;
+              if (raw instanceof Blob) raw = await raw.arrayBuffer();
+              play24kPcm(raw);
+            }
+          };
+
+          ws.onerror = () => {
+            statusDot.className = "status-dot error";
+            statusText.textContent = "Connection Error";
+          };
+
+          ws.onclose = () => {
+            isConnected = false;
+            statusDot.className = "status-dot error";
+            statusText.textContent = "Disconnected (Reconnecting...)";
+            stopMic();
+            setTimeout(connectWs, 3000);
+          };
+        } catch (e) {
+          statusText.textContent = "Init Error: " + e.message;
+        }
+      }
+
+      // iOS Audio Unlock & Silent Loop for Background Playback
+      function unlockAudio() {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+        }
+        if (audioCtx.state === "suspended") {
+          audioCtx.resume();
+        }
+        // Silent oscillator keeps iOS WebKit audio thread active in background/Slide Over
+        try {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          gain.gain.value = 0.001; // virtually inaudible
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+        } catch (_) {}
+      }
+
+      async function startMic() {
+        unlockAudio();
+        if (!ws || ws.readyState !== 1) connectWs();
+
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          });
+          const src = audioCtx.createMediaStreamSource(micStream);
+          spNode = audioCtx.createScriptProcessor(4096, 1, 1);
+          spNode.onaudioprocess = (e) => {
+            if (!isRecording || !ws || ws.readyState !== 1) return;
+            const inData = e.inputBuffer.getChannelData(0);
+            const ds = downsample(inData, audioCtx.sampleRate, 16000);
+            const pcm16 = toInt16(ds);
+            ws.send(pcm16);
+
+            // Audio reaction
+            let sum = 0;
+            for (let i = 0; i < inData.length; i += 16) sum += inData[i] * inData[i];
+            const rms = Math.sqrt(sum / (inData.length / 16));
+            const scale = 1 + Math.min(rms * 12, 0.6);
+            orbAura.style.transform = `scale(${scale})`;
+          };
+
+          src.connect(spNode);
+          const mute = audioCtx.createGain();
+          mute.gain.value = 0;
+          spNode.connect(mute);
+          mute.connect(audioCtx.destination);
+
+          isRecording = true;
+          orbBtn.classList.add("recording");
+          orbBtn.textContent = "🔴";
+          orbHint.textContent = "Listening to you...";
+        } catch (err) {
+          addMessage("System", "Microphone error: " + err.message, "tool");
+          stopMic();
+        }
+      }
+
+      function stopMic() {
+        isRecording = false;
+        orbBtn.classList.remove("recording");
+        orbBtn.textContent = "🎙️";
+        orbHint.textContent = "Tap orb to speak";
+        orbAura.style.transform = "scale(1)";
+        if (micStream) {
+          micStream.getTracks().forEach((t) => t.stop());
+          micStream = null;
+        }
+        if (spNode) {
+          try { spNode.disconnect(); } catch (_) {}
+          spNode = null;
+        }
+      }
+
+      orbBtn.onclick = () => {
+        if (isRecording) stopMic();
+        else startMic();
+      };
+
+      // Connect immediately on page load
+      connectWs();
+    })();
+  </script>
+</body>
 </html>

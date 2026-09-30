@@ -16,8 +16,25 @@ class AntigravityChatController:
 
     def find_cdp_ws_url(self) -> str | None:
         """Discovers the active CDP Page WebSocket URL from Antigravity's language server logs."""
-        log_path = os.path.expanduser("~/Library/Logs/Antigravity/language_server.log")
-        if not os.path.exists(log_path):
+        log_paths = [
+            os.path.expanduser("~/Library/Logs/Antigravity/language_server.log"),
+            os.path.expanduser("~/.config/Antigravity/logs/language_server.log"),
+        ]
+        log_path = next((p for p in log_paths if os.path.exists(p)), None)
+        if not log_path:
+            # Direct DevToolsActivePort fallback on Linux
+            port_file = os.path.expanduser("~/.config/Antigravity/DevToolsActivePort")
+            if os.path.exists(port_file):
+                try:
+                    with open(port_file, "r") as f:
+                        port = int(f.readline().strip())
+                    req = urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1)
+                    targets = json.loads(req.read().decode())
+                    for t in targets:
+                        if t.get("type") == "page" and "webSocketDebuggerUrl" in t:
+                            return t["webSocketDebuggerUrl"]
+                except Exception as e:
+                    logger.warning(f"DevToolsActivePort fallback failed: {e}")
             logger.warning("Antigravity language_server.log not found.")
             return None
 

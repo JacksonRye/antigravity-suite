@@ -117,7 +117,11 @@ async def root():
 
 @app.get("/butler.user.js")
 async def serve_userscript():
-    return FileResponse("frontend/butler.user.js", media_type="text/javascript")
+    return FileResponse(
+        "frontend/butler.user.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 @app.websocket("/ws")

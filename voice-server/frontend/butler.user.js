@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Antigravity Voice Butler (Gemini Live)
 // @namespace    https://butler.retake.cloud/
-// @version      3.1.0
+// @version      3.2.0
 // @description  In-Tab Gemini Live Voice Butler with 100% active chat context and direct typing
 // @match        *://*/*
 // @grant        none
@@ -344,18 +344,19 @@
   }
 
   // Silent Context Sync across conversation switches
+  let currentConvTitle = "";
   function syncActiveChat(force = false) {
     const conv = detectActiveConv();
     if (conv && conv.id && (conv.id !== currentConvId || force)) {
       currentConvId = conv.id;
-      const title = conv.title || "Chat";
-      log("Switched to conversation: " + title.slice(0, 24), "#10b981");
-      statusBadge.textContent = title.slice(0, 16);
+      currentConvTitle = conv.title || "Active Chat";
+      log("Switched to conversation: " + currentConvTitle.slice(0, 24), "#10b981");
+      statusBadge.textContent = "Chat: " + currentConvTitle.slice(0, 16);
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({
           type: "set_active_conversation",
           conversation_id: conv.id,
-          title: title,
+          title: currentConvTitle,
         }));
       }
     }
@@ -531,7 +532,12 @@
         if (typeof e.data === "string") {
           try {
             const m = JSON.parse(e.data);
-            if (m.type === "gemini") {
+            if (m.type === "active_conversation_updated") {
+              currentConvId = m.conversation_id;
+              currentConvTitle = m.title || "Active Chat";
+              statusBadge.textContent = "Chat: " + currentConvTitle.slice(0, 16);
+              log("[Synced to " + currentConvTitle + "]", "#10b981");
+            } else if (m.type === "gemini") {
               log("Puck: " + m.text, "#c084fc");
             } else if (m.type === "user") {
               log("You: " + m.text, "#38bdf8");
@@ -558,7 +564,7 @@
               log("[Interrupted]", "#94a3b8");
               stopPlayback();
             } else if (m.type === "turn_complete") {
-              statusBadge.textContent = isRecording ? "Listening..." : "Butler Ready";
+              statusBadge.textContent = isRecording ? "Listening..." : (currentConvTitle ? "Chat: " + currentConvTitle.slice(0, 14) : "Butler Ready");
             } else if (m.type === "error") {
               log("Error: " + m.error, "#ef4444");
             }

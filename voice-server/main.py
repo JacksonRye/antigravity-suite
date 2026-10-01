@@ -39,6 +39,7 @@ TWILIO_APP_HOST = os.getenv("TWILIO_APP_HOST")
 
 from transcript_watcher import TranscriptWatcher
 from antigravity_controller import AntigravityChatController
+from cdp_bridge import cdp_bridge
 
 chat_controller = AntigravityChatController()
 
@@ -318,50 +319,43 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     )
 
     async def dispatch_write_to_chat(prompt: str, submit: bool = False):
-        logger.info(f"dispatch_write_to_chat called: {prompt[:60]}... (submit={submit})")
-        client_dispatched = False
-        last_write_event.clear()
-        last_write_success[0] = False
+        logger.info(f"dispatch_write_to_chat called via VPS CDP Bridge: '{prompt[:40]}...' (submit={submit})")
 
-        # 1. Primary: Direct in-tab typing on the connected client's browser DOM
-        for ws in list(connected_clients):
+        # 1. Execute direct typing via Linux VPS CDP Bridge (native hardware-level input directly inside Antigravity)
+        cdp_res = await cdp_bridge.write_and_submit_prompt(prompt, submit=submit)
+        success = cdp_res.get("success", False)
+
+        # 2. Broadcast status to connected clients (iPad Safari tab / PWA)
+        for client_ws in list(connected_clients):
             try:
-                await ws.send_json({
-                    "type": "client_write_to_chat",
+                await client_ws.send_json({
+                    "type": "prompt_submitted_to_ide",
                     "prompt": prompt,
                     "submit": submit,
+                    "success": success,
                 })
-                client_dispatched = True
-                logger.info("Successfully dispatched client_write_to_chat to active tab!")
             except Exception as e:
-                logger.warning(f"Could not dispatch to client ws: {e}")
+                logger.warning(f"Could not notify client ws: {e}")
 
-        # 2. Wait for client confirmation or fallback to server CDP
-        client_confirmed = False
-        if client_dispatched:
-            try:
-                await asyncio.wait_for(last_write_event.wait(), timeout=1.5)
-                client_confirmed = last_write_success[0]
-            except asyncio.TimeoutError:
-                logger.info("Client in-tab write unconfirmed after 1.5s; attempting VPS CDP fallback.")
+        # 3. Fallback: if CDP failed, dispatch to in-tab client
+        if not success:
+            logger.info("CDP bridge did not succeed; dispatching to in-tab client as fallback...")
+            for ws in list(connected_clients):
+                try:
+                    await ws.send_json({
+                        "type": "client_write_to_chat",
+                        "prompt": prompt,
+                        "submit": submit,
+                    })
+                except Exception:
+                    pass
 
-        if not client_confirmed:
-            logger.info("Client in-tab write unconfirmed or failed; executing server CDP fallback...")
-            pinned = watcher.pinned_conversation_id
-            cdp_res = await chat_controller.write_to_chat(prompt, submit, target_conv_id=pinned)
-        else:
-            logger.info("In-tab client confirmed successful DOM typing; skipping CDP.")
-            cdp_res = {"status": "skipped", "reason": "in_tab_client_confirmed"}
-
-        overall_success = client_confirmed or (cdp_res.get("success") if isinstance(cdp_res, dict) else False)
         return {
-            "success": bool(overall_success),
-            "client_dispatched": client_dispatched,
-            "client_confirmed": client_confirmed,
+            "success": bool(success),
             "cdp": cdp_res,
             "prompt": prompt,
             "submit": submit,
-            "error": None if overall_success else "Input element could not be found or typed into on active browser tab"
+            "error": None if success else cdp_res.get("error", "Failed to type into IDE via CDP")
         }
 
     async def dispatch_switch_active_conversation(conversation_name_or_id: str):
@@ -370,6 +364,8 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         if res.get("status") == "success":
             cid = res.get("conversation_id")
             title = res.get("title")
+            # Navigate VPS Antigravity instance via CDP
+            asyncio.create_task(cdp_bridge.navigate_to_conversation(cid))
             for ws in list(connected_clients):
                 try:
                     await ws.send_json({

@@ -543,6 +543,8 @@
               log("You: " + m.text, "#38bdf8");
             } else if (m.type === "tool_start") {
               log("[Tool: " + m.name + "]", "#f59e0b");
+            } else if (m.type === "prompt_submitted_to_ide") {
+              log("[VPS Bridge: Prompt sent & submitted!]", "#10b981");
             } else if (m.type === "client_write_to_chat") {
               writeToCurrentChat(m.prompt, m.submit);
             } else if (m.type === "client_navigate_to_conv") {

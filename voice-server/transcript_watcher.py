@@ -628,14 +628,6 @@ class TranscriptWatcher:
             # Stop audio playback and cancel ongoing speech task
             self.stop_current_playback()
             self.is_speaking = False
-            # Save interrupted explanation to memory so developer can ask to resume
-            if self.pinned_conversation_id:
-                self.interrupted_summaries[self.pinned_conversation_id] = {
-                    "text": self.current_speaking_summary,
-                    "title": self.current_title or "the previous chat",
-                }
-                self.last_interrupted_conv_id = self.pinned_conversation_id
-                logger.info(f"Butler interrupted mid-speech on tab switch. Saved interrupted summary for conv '{self.pinned_conversation_id}' ('{self.current_title}').")
 
             # Verbal announcement: announce the conversation switch out loud
             announcement = (
@@ -702,41 +694,13 @@ class TranscriptWatcher:
             }
             logger.info(f"Initialized per-chat Butler state for {target_conv_id} (silently aligned at step {highest_step})")
 
-        # Notify Gemini Live of the newly focused conversation's rolling context and any interrupted context
+        # Notify Gemini Live of the newly focused conversation's rolling context
         summary = self.get_rolling_summary(path, max_turns=5)
         if self.on_context_update:
-            interrupted_block = ""
-            # Check if this target tab itself has pending interrupted speech
-            if target_conv_id in self.interrupted_summaries:
-                my_interrupted = self.interrupted_summaries[target_conv_id]
-                interrupted_text = my_interrupted.get("text", "")
-                interrupted_block = (
-                    f"\n[INTERRUPTED EXPLANATION MEMORY (CURRENT TAB): In this conversation ('{target_title}'), you were interrupted while explaining:\n"
-                    f"\"{interrupted_text}\"\n"
-                    "Because the developer is now BACK on this original tab, if the developer asks you to continue, says 'continue', 'what were you saying?', or asks to resume, "
-                    "begin your spoken response with: 'As I was saying,' and seamlessly continue explaining the remaining portion without restarting from the beginning.]\n"
-                )
-            elif self.last_interrupted_conv_id and self.last_interrupted_conv_id != target_conv_id:
-                # Interrupted on a DIFFERENT tab
-                other_info = self.interrupted_summaries.get(self.last_interrupted_conv_id, {})
-                other_title = other_info.get("title", "our previous chat")
-                other_text = other_info.get("text", "")
-                interrupted_block = (
-                    f"\n[CROSS-TAB CONTINUATION DIRECTIVE: Notice that you were previously explaining something in '{other_title}':\n"
-                    f"\"{other_text[:500]}\"\n"
-                    f"However, the developer is currently on a DIFFERENT tab: '{target_title}'.\n"
-                    "If the developer asks you to 'continue', 'what were you saying?', or asks to resume while viewing this different tab: "
-                    f"DO NOT continue reciting the explanation from '{other_title}'!\n"
-                    f"Instead, politely acknowledge both and ask which one they'd like to discuss by saying aloud:\n"
-                    f"\"In our {other_title} chat, I was explaining [topic in 3-5 words]. But over here in {target_title}, we are working on [current chat topic in 3-5 words]. Which would you like me to discuss?\"\n"
-                    "Then pause and wait for the developer's answer.]\n"
-                )
-
             context_msg = (
-                f"[SYSTEM CONTEXT: The developer has switched active focus to chat '{target_title}' (id: {self.pinned_conversation_id}).\n"
+                f"[SYSTEM CONTEXT: The developer has active focus on chat '{target_title}' (id: {self.pinned_conversation_id}).\n"
                 f"Here is the recent on-screen chat history and context for this active tab:\n{summary}\n"
-                f"{interrupted_block}"
-                "Keep our ongoing verbal dialogue active and seamlessly pivot to discuss this chat when the developer speaks to you. "
+                "Keep our ongoing verbal dialogue active and seamlessly discuss this chat when the developer speaks to you. "
                 "Stay silent and do not speak out loud until the developer speaks to you.]"
             )
             try:

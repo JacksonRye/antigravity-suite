@@ -603,13 +603,20 @@
 
       ws.onclose = () => {
         isConnected = false;
-        document.getElementById("ag-butler-dot").style.background = "#ef4444";
-        statusBadge.textContent = "Offline (Tap 🎙️)";
-        log("WebSocket closed", "#f43f5e");
+        const dot = document.getElementById("ag-butler-dot");
+        if (dot) dot.style.background = "#ef4444";
+        statusBadge.textContent = "Reconnecting...";
+        log("Connection closed. Reconnecting...", "#f43f5e");
         stopMic();
+        setTimeout(() => {
+          if (!isConnected) connectWs();
+        }, 2000);
       };
     } catch (err) {
       log("Connection failed: " + err.message, "#ef4444");
+      setTimeout(() => {
+        if (!isConnected) connectWs();
+      }, 3000);
     }
   }
 
@@ -740,6 +747,11 @@
 
   orbBtn.onclick = () => {
     if (isDragging) return;
+    if (!ws || ws.readyState !== 1) {
+      statusBadge.textContent = "Connecting...";
+      connectWs();
+      return;
+    }
     if (isRecording) stopMic();
     else startMic();
   };

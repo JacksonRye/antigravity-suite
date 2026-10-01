@@ -213,7 +213,7 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
             ),
             types.FunctionDeclaration(
                 name="write_to_chat",
-                description="Types a prompt into the Antigravity chat input box. Set submit=True if the developer explicitly said to send, run, execute, tell the agent, or submit it immediately. Set submit=False if the developer asked to type, draft, or write it without sending.",
+                description="Types a prompt into the Antigravity chat input box of the detected active conversation. Set submit=True if the developer explicitly said to send, run, execute, tell the agent, or submit it immediately. Set submit=False if the developer asked to type, draft, or write it without sending.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     required=["prompt"],
@@ -225,6 +225,10 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                         "submit": types.Schema(
                             type=types.Type.BOOLEAN,
                             description="Whether to submit the message immediately (true) or leave it drafted in the input box for manual review (false)."
+                        ),
+                        "conversation_id": types.Schema(
+                            type=types.Type.STRING,
+                            description="Optional target conversation ID. Defaults to the active detected conversation ID."
                         )
                     }
                 )
@@ -318,62 +322,57 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
         ]
     )
 
-    async def dispatch_write_to_chat(prompt: str, submit: bool = False):
-        logger.info(f"dispatch_write_to_chat called: '{prompt[:40]}...' (submit={submit})")
+    async def dispatch_write_to_chat(prompt: str, submit: bool = False, conversation_id: str | None = None):
+        target_conv_id = conversation_id or watcher.pinned_conversation_id or (watcher.current_path.split(os.sep)[-4] if watcher.current_path else "")
+        logger.info(f"dispatch_write_to_chat called for conv '{target_conv_id}': '{prompt[:40]}...' (submit={submit})")
 
-        # 1. If an in-tab browser client (Safari / Chrome extension) is connected, dispatch directly to it
-        if connected_clients:
-            logger.info("Dispatching write_to_chat directly to active in-tab browser client...")
-            last_write_event.clear()
-            last_write_success[0] = False
-            for ws in list(connected_clients):
-                try:
-                    await ws.send_json({
-                        "type": "client_write_to_chat",
-                        "prompt": prompt,
-                        "submit": submit,
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to dispatch to client ws: {e}")
+        if not connected_clients:
+            logger.warning("No active browser client connected to receive write_to_chat command.")
+            return {
+                "success": False,
+                "error": "No active browser tab connected. Please open Antigravity in your browser.",
+                "conversation_id": target_conv_id
+            }
 
+        logger.info(f"Dispatching write_to_chat directly to active browser client tab for conversation {target_conv_id}...")
+        last_write_event.clear()
+        last_write_success[0] = False
+
+        for ws in list(connected_clients):
             try:
-                await asyncio.wait_for(last_write_event.wait(), timeout=3.5)
-                if last_write_success[0]:
-                    logger.info("In-tab browser client successfully wrote to chat!")
-                    return {
-                        "success": True,
-                        "source": "in_tab_client",
-                        "prompt": prompt,
-                        "submit": submit
-                    }
-                else:
-                    logger.warning("In-tab browser client reported write failure; falling back to VPS CDP...")
-            except asyncio.TimeoutError:
-                logger.warning("Timed out waiting for in-tab browser client; falling back to VPS CDP...")
-
-        # 2. Fallback to VPS CDP Bridge (native hardware-level input directly inside VPS Antigravity)
-        logger.info(f"Executing typing via Linux VPS CDP Bridge: '{prompt[:40]}...' (submit={submit})")
-        cdp_res = await cdp_bridge.write_and_submit_prompt(prompt, submit=submit)
-        success = cdp_res.get("success", False)
-
-        for client_ws in list(connected_clients):
-            try:
-                await client_ws.send_json({
-                    "type": "prompt_submitted_to_ide",
+                await ws.send_json({
+                    "type": "client_write_to_chat",
                     "prompt": prompt,
                     "submit": submit,
-                    "success": success,
+                    "conversation_id": target_conv_id
                 })
             except Exception as e:
-                logger.warning(f"Could not notify client ws: {e}")
+                logger.warning(f"Failed to dispatch to client ws: {e}")
 
-        return {
-            "success": bool(success),
-            "cdp": cdp_res,
-            "prompt": prompt,
-            "submit": submit,
-            "error": None if success else cdp_res.get("error", "Failed to type into IDE via CDP")
-        }
+        try:
+            await asyncio.wait_for(last_write_event.wait(), timeout=5.0)
+            if last_write_success[0]:
+                logger.info(f"In-tab browser client successfully wrote to chat for conversation {target_conv_id}!")
+                return {
+                    "success": True,
+                    "conversation_id": target_conv_id,
+                    "prompt": prompt,
+                    "submit": submit
+                }
+            else:
+                logger.warning(f"In-tab browser client reported failure writing to chat for {target_conv_id}.")
+                return {
+                    "success": False,
+                    "error": "Browser extension could not find chat input on screen.",
+                    "conversation_id": target_conv_id
+                }
+        except asyncio.TimeoutError:
+            logger.warning(f"Timed out waiting for browser extension confirmation on conversation {target_conv_id}.")
+            return {
+                "success": False,
+                "error": "Browser extension timed out while typing into chat.",
+                "conversation_id": target_conv_id
+            }
 
     async def dispatch_switch_active_conversation(conversation_name_or_id: str):
         logger.info(f"dispatch_switch_active_conversation called: '{conversation_name_or_id}'")

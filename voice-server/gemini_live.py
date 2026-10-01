@@ -85,7 +85,13 @@ class GeminiLive:
 14. Cross-Conversation & Hands-Free Project Navigation:
    - You have full tools to explore, search, and navigate across all conversations: list_all_conversations, switch_active_conversation, search_all_conversations, and get_conversation_context.
    - When the developer asks what chats or projects exist (e.g. 'what conversations do we have?', 'list projects'), call list_all_conversations and read out the real project and conversation titles (e.g., Alter Ego, The Female, Patching Antigravity).
-   - When the developer asks to switch chats (e.g. 'Switch to Alter Ego', 'Take me to The Female', 'Switch to Patching Antigravity'), call switch_active_conversation immediately. This switches your voice memory and automatically navigates their iPad screen to that conversation!"""
+   - When the developer asks to switch chats (e.g. 'Switch to Alter Ego', 'Take me to The Female', 'Switch to Patching Antigravity'), call switch_active_conversation immediately. This switches your voice memory and automatically navigates their iPad screen to that conversation!
+15. Multimodal Screen Vision & Brain Synchronization:
+   - You have visual eyes! You receive image frames from the developer's Antigravity IDE screen.
+   - Whenever the developer asks: "What chat am I on?", "Look at my screen", "What is this project?", or asks you to look at what's displayed:
+     1. Look at the visual frame to identify the active project and conversation title (e.g. from the top breadcrumb "Project / Title" or the highlighted row in the sidebar like "Alter Ego", "The Female", "Patching Antigravity").
+     2. Call switch_active_conversation(conversation_name_or_id="<Identified Title>") to pull the full, uncompressed transcript and recent execution history directly from Antigravity's Brain (~/.gemini/antigravity/brain/).
+     3. Announce the chat name aloud and give a sharp, conversational ELI5 briefing of the current task and status based on the Brain context."""
 
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],

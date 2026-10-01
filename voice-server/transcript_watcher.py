@@ -510,12 +510,16 @@ class TranscriptWatcher:
         self.switch_to_conversation(target_path, conv_id=target_cid, title=target_title)
 
         summary = self.get_rolling_summary(target_path, max_turns=5)
+        exec_ctx = self.extract_task_execution_context(target_path, final_step=999999)
         return {
             "status": "success",
             "conversation_id": target_cid,
             "title": target_title,
             "message": f"Successfully switched context to '{target_title}'.",
-            "recent_context": summary
+            "recent_context": summary,
+            "latest_goal": exec_ctx.get("user_goal", ""),
+            "files_touched": list(exec_ctx.get("files_touched", [])),
+            "recent_actions": exec_ctx.get("actions", [])[-5:]
         }
 
     def get_latest_user_input_timestamp(self, path):

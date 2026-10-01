@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Antigravity Voice Butler (Gemini Live)
 // @namespace    https://butler.retake.cloud/
-// @version      3.3.0
-// @description  In-Tab Gemini Live Voice Butler with 100% active chat context and direct typing
+// @version      3.4.0
+// @description  In-Tab Gemini Live Voice Butler with Multimodal Screen Vision and Brain Context Sync
 // @match        *://*/*
 // @grant        none
 // @run-at       document-end
@@ -23,6 +23,16 @@
   let isConnected = false;
   let currentConvId = "";
   let scheduledSources = [];
+  let isCapturingSnapshot = false;
+  let snapshotInterval = null;
+
+  // Dynamically load html2canvas for high-fidelity tab snapshot capture
+  if (!window.html2canvas) {
+    const h2cScript = document.createElement("script");
+    h2cScript.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+    h2cScript.async = true;
+    document.head.appendChild(h2cScript);
+  }
   let nextStartTime = 0;
   let isDragging = false;
 
@@ -603,8 +613,61 @@
     }
   }
 
+  // Screen Vision Snapshot Engine
+  async function captureAndSendScreenSnapshot() {
+    if (isCapturingSnapshot || !ws || ws.readyState !== 1) return;
+    isCapturingSnapshot = true;
+    try {
+      const root = document.getElementById("ag-butler-in-tab-root");
+      if (window.html2canvas) {
+        if (root) root.style.opacity = "0.05";
+        const canvas = await window.html2canvas(document.body, {
+          scale: 0.5,
+          useCORS: true,
+          logging: false,
+          ignoreElements: (el) => el.id === "ag-butler-in-tab-root",
+        });
+        if (root) root.style.opacity = "1";
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.65);
+        const b64 = dataUrl.split(",")[1];
+        if (b64 && ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "image", data: b64 }));
+          log("[Screen Snapshot sent to Puck]", "#38bdf8");
+        }
+      } else {
+        const w = window.innerWidth || 1024;
+        const h = window.innerHeight || 768;
+        const breadcrumb = document.querySelector('header span, nav span, [class*="breadcrumb"]')?.innerText || document.title;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(w / 2);
+        canvas.height = Math.round(h / 2);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#1e1e1e";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 20px sans-serif";
+        ctx.fillText(document.title || "Antigravity", 20, 40);
+        ctx.font = "16px sans-serif";
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText("Active: " + (currentConvTitle || breadcrumb), 20, 80);
+        const b64 = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
+        if (b64 && ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "image", data: b64 }));
+          log("[Screen State sent to Puck]", "#38bdf8");
+        }
+      }
+    } catch (err) {
+      console.warn("Screen snapshot error:", err);
+    } finally {
+      const root = document.getElementById("ag-butler-in-tab-root");
+      if (root) root.style.opacity = "1";
+      isCapturingSnapshot = false;
+    }
+  }
+
   // Microphone Streaming
   async function startMic() {
+    unlockAudio();
     if (!ws || ws.readyState !== 1) connectWs();
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
@@ -643,6 +706,11 @@
       orbBtn.style.boxShadow = "0 0 20px rgba(220, 38, 38, 0.7)";
       statusBadge.textContent = "Listening...";
       log("Mic streaming 16kHz PCM", "#ef4444");
+
+      // Send on-demand snapshot of tab when speaking starts & pulse every 5s
+      setTimeout(captureAndSendScreenSnapshot, 200);
+      if (snapshotInterval) clearInterval(snapshotInterval);
+      snapshotInterval = setInterval(captureAndSendScreenSnapshot, 5000);
     } catch (err) {
       log("Mic error: " + err.message, "#ef4444");
       stopMic();
@@ -651,6 +719,10 @@
 
   function stopMic() {
     isRecording = false;
+    if (snapshotInterval) {
+      clearInterval(snapshotInterval);
+      snapshotInterval = null;
+    }
     orbBtn.textContent = "🎙️";
     orbBtn.style.background = "radial-gradient(circle at 35% 30%, #38bdf8 0%, #6366f1 60%, #4338ca 100%)";
     orbBtn.style.boxShadow = "0 4px 16px rgba(99, 102, 241, 0.6)";

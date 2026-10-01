@@ -405,6 +405,7 @@
       <div class="orb-hint" id="orbHint">Tap the orb to start speaking</div>
       <div class="action-chips">
         <button class="chip active" id="vadChip">Hands-Free (Auto-Listen)</button>
+        <button class="chip" id="cameraChip">📷 Screen/Camera Vision</button>
         <button class="chip" id="interruptChip">Interrupt Puck</button>
       </div>
     </div>
@@ -678,6 +679,61 @@
           spNode = null;
         }
       }
+
+      let videoStream = null;
+      let videoInterval = null;
+      const cameraChip = document.getElementById("cameraChip");
+
+      async function toggleVideoVision() {
+        if (videoStream) {
+          if (videoInterval) clearInterval(videoInterval);
+          videoStream.getTracks().forEach(t => t.stop());
+          videoStream = null;
+          cameraChip.classList.remove("active");
+          addMessage("System", "Vision feed paused", "tool");
+          return;
+        }
+
+        try {
+          if (navigator.mediaDevices.getDisplayMedia) {
+            try {
+              videoStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            } catch (e) {
+              videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            }
+          } else {
+            videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          }
+
+          cameraChip.classList.add("active");
+          addMessage("System", "Vision feed active: streaming screen/camera to Puck", "tool");
+
+          const videoEl = document.createElement("video");
+          videoEl.muted = true;
+          videoEl.playsInline = true;
+          videoEl.srcObject = videoStream;
+          videoEl.play();
+
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+
+          videoInterval = setInterval(() => {
+            if (!videoStream || !ws || ws.readyState !== 1) return;
+            if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+              canvas.width = Math.min(videoEl.videoWidth, 960);
+              canvas.height = Math.round(canvas.width * (videoEl.videoHeight / videoEl.videoWidth));
+              ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+              const b64 = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
+              if (b64) {
+                ws.send(JSON.stringify({ type: "image", data: b64 }));
+              }
+            }
+          }, 2000);
+        } catch (err) {
+          addMessage("System", "Vision feed error: " + err.message, "tool");
+        }
+      }
+      if (cameraChip) cameraChip.onclick = toggleVideoVision;
 
       orbBtn.onclick = () => {
         if (isRecording) stopMic();

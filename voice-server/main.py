@@ -432,15 +432,41 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                                 image_data = base64.b64decode(payload["data"])
                                 await video_input_queue.put(image_data)
                                 continue
-                            elif payload.get("type") == "set_active_conversation":
+                            elif payload.get("type") in ("set_active_conversation", "switch_active_conversation"):
                                 conv_id = payload.get("conversation_id")
-                                title = payload.get("title", "")
-                                cand_path = os.path.join(watcher.get_brain_dir(), str(conv_id), ".system_generated", "logs", "transcript.jsonl")
-                                if os.path.exists(cand_path):
-                                    logger.info(f"Client requested pin to active conversation: {conv_id} ({title})")
-                                    watcher.set_active_conversation(conv_id, title=title)
+                                title = payload.get("title") or payload.get("conversation_name", "")
+
+                                switched = False
+                                if conv_id:
+                                    cand_path = os.path.join(watcher.get_brain_dir(), str(conv_id), ".system_generated", "logs", "transcript.jsonl")
+                                    if os.path.exists(cand_path):
+                                        logger.info(f"Client requested pin to active conversation ID: {conv_id} ({title})")
+                                        watcher.set_active_conversation(conv_id, title=title, force=True)
+                                        switched = True
+
+                                if not switched and title:
+                                    res = watcher.switch_active_conversation(title)
+                                    if res.get("status") == "success":
+                                        conv_id = res.get("conversation_id")
+                                        title = res.get("title")
+                                        switched = True
+                                        logger.info(f"Resolved title '{title}' to conv_id '{conv_id}'")
+
+                                if switched:
+                                    summary = watcher.get_rolling_summary(watcher.current_path, max_turns=5)
+                                    sys_msg = (
+                                        f"[SYSTEM UPDATE: The developer has switched active focus to chat '{title}' (id: {conv_id}). "
+                                        f"Recent context from this conversation:\n{summary}\n"
+                                        "You are now discussing this conversation.]"
+                                    )
+                                    await text_input_queue.put({"text": sys_msg, "turn_complete": False})
+                                    await websocket.send_json({
+                                        "type": "active_conversation_updated",
+                                        "conversation_id": conv_id,
+                                        "title": title,
+                                    })
                                 else:
-                                    logger.warning(f"Ignored client pin to non-existent conversation: {conv_id} ({title})")
+                                    logger.warning(f"Could not switch conversation with conv_id='{conv_id}', title='{title}'")
                                 continue
                             elif payload.get("type") == "client_write_success":
                                 logger.info("In-tab client confirmed successful write!")

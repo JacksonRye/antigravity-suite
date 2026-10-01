@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Antigravity Voice Butler (Gemini Live)
 // @namespace    https://butler.retake.cloud/
-// @version      3.2.0
+// @version      3.3.0
 // @description  In-Tab Gemini Live Voice Butler with 100% active chat context and direct typing
 // @match        *://*/*
 // @grant        none
@@ -294,7 +294,10 @@
 
   // Active Conversation Identification
   function detectActiveConv() {
-    // 1. Direct active conversation view (THE source of truth rendered on screen)
+    let title = "";
+    let cid = "";
+
+    // 1. Direct active conversation view (rendered on screen)
     const view = document.querySelector('[data-testid="conversation-view"]');
     const viewCid = view?.getAttribute('data-cascade-id');
 
@@ -302,42 +305,43 @@
     const urlMatch = window.location.pathname.match(/\/c\/([0-9a-f-]{36})/i) ||
                      window.location.hash.match(/\/c\/([0-9a-f-]{36})/i);
     const urlCid = urlMatch?.[1];
+    cid = viewCid || urlCid || "";
 
-    const cid = viewCid || urlCid;
-
-    // Detect Title
-    let title = "";
-    if (cid) {
-      const row = document.querySelector(`[data-cascade-id="${cid}"]`);
-      if (row) {
-        title = row.querySelector('span')?.innerText?.trim() ||
-                row.querySelector('a')?.getAttribute('aria-label') || "";
+    // 3. Inspect top breadcrumbs (e.g. "Alter Ego / Alter Ego" or "Project / Chat Name")
+    const breadcrumbEls = document.querySelectorAll('header span, nav span, [class*="breadcrumb"], div[class*="items-center"] span');
+    for (const b of breadcrumbEls) {
+      const txt = (b.innerText || "").trim();
+      if (txt.includes(' / ') || (txt.includes('/') && txt.length > 3)) {
+        const parts = txt.split('/').map(s => s.trim()).filter(Boolean);
+        if (parts.length > 0) {
+          title = parts[parts.length - 1];
+          break;
+        }
       }
     }
 
-    if (!title && view) {
-      const headerEl = view.parentElement?.querySelector('nav, header, [class*="breadcrumb"]') ||
-                       document.querySelector('header');
-      if (headerEl) {
-        const parts = headerEl.innerText.split(/[\/\n]/).map(s => s.trim()).filter(Boolean);
-        if (parts.length > 0) title = parts[parts.length - 1];
+    // 4. Inspect active sidebar item
+    if (!title) {
+      const activeSidebar = document.querySelector('[data-testid="conversation-row-sidebar"][data-selected="true"], [class*="bg-sidebar-secondary"], [class*="bg-accent"], [aria-selected="true"]');
+      if (activeSidebar) {
+        const sParts = (activeSidebar.innerText || "").trim().split('\n').filter(Boolean);
+        if (sParts.length > 0 && sParts[0] !== "New Conversation") {
+          title = sParts[0];
+          cid = cid || activeSidebar.getAttribute('data-cascade-id') || activeSidebar.querySelector('a')?.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i)?.[1] || "";
+        }
       }
     }
 
+    // 5. Document title fallback
     if (!title && document.title) {
-      title = document.title.replace(/\s*-\s*Antigravity\s*$/i, "").trim();
+      const docT = document.title.replace(/\s*-\s*Antigravity\s*$/i, "").trim();
+      if (docT && docT.toLowerCase() !== "antigravity") {
+        title = docT;
+      }
     }
 
-    if (cid) {
+    if (cid || title) {
       return { id: cid, title: title || "Active Chat" };
-    }
-
-    // 3. Fallback: sidebar row
-    const selectedRow = document.querySelector('[data-testid="conversation-row-sidebar"][data-selected="true"], .bg-sidebar-secondary[data-cascade-id]');
-    if (selectedRow) {
-      const sid = selectedRow.getAttribute('data-cascade-id') || selectedRow.querySelector('a')?.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i)?.[1];
-      const sTitle = selectedRow.querySelector('span')?.innerText?.trim() || "";
-      if (sid) return { id: sid, title: sTitle || "Active Chat" };
     }
 
     return null;
@@ -347,17 +351,21 @@
   let currentConvTitle = "";
   function syncActiveChat(force = false) {
     const conv = detectActiveConv();
-    if (conv && conv.id && (conv.id !== currentConvId || force)) {
-      currentConvId = conv.id;
-      currentConvTitle = conv.title || "Active Chat";
-      log("Switched to conversation: " + currentConvTitle.slice(0, 24), "#10b981");
-      statusBadge.textContent = "Chat: " + currentConvTitle.slice(0, 16);
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({
-          type: "set_active_conversation",
-          conversation_id: conv.id,
-          title: currentConvTitle,
-        }));
+    if (conv && (conv.id || conv.title)) {
+      const isNewId = conv.id && conv.id !== currentConvId;
+      const isNewTitle = conv.title && conv.title !== currentConvTitle && conv.title !== "Active Chat";
+      if (isNewId || isNewTitle || force) {
+        if (conv.id) currentConvId = conv.id;
+        if (conv.title && conv.title !== "Active Chat") currentConvTitle = conv.title;
+        log("Active: " + currentConvTitle.slice(0, 24), "#10b981");
+        statusBadge.textContent = "Chat: " + currentConvTitle.slice(0, 16);
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({
+            type: "switch_active_conversation",
+            conversation_id: conv.id || "",
+            title: currentConvTitle,
+          }));
+        }
       }
     }
   }
@@ -678,10 +686,24 @@
   window.addEventListener("popstate", () => syncActiveChat());
   // Listen for clicks on conversation items in the sidebar for instant sync
   document.addEventListener("click", (e) => {
-    if (e.target.closest('[data-testid="conversation-row-sidebar"], a[href*="/c/"]')) {
-      setTimeout(() => syncActiveChat(true), 150);
-      setTimeout(() => syncActiveChat(true), 600);
+    const row = e.target.closest('[data-testid="conversation-row-sidebar"], a[href*="/c/"], [data-cascade-id], [class*="rounded"]');
+    if (row && (row.closest('nav') || row.closest('aside') || row.closest('[class*="sidebar"]'))) {
+      const parts = (row.innerText || "").trim().split('\n').filter(Boolean);
+      const title = parts[0];
+      const cid = row.getAttribute('data-cascade-id') || row.querySelector('a')?.getAttribute('href')?.match(/\/c\/([0-9a-f-]{36})/i)?.[1];
+      if (title && title.length > 1 && title !== "New Conversation") {
+        log("[Selected " + title + "]", "#38bdf8");
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({
+            type: "switch_active_conversation",
+            conversation_id: cid || "",
+            title: title,
+          }));
+        }
+      }
     }
+    setTimeout(() => syncActiveChat(true), 150);
+    setTimeout(() => syncActiveChat(true), 600);
   });
   setInterval(syncActiveChat, 1000);
 

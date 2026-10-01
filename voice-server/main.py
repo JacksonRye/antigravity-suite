@@ -319,13 +319,43 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     )
 
     async def dispatch_write_to_chat(prompt: str, submit: bool = False):
-        logger.info(f"dispatch_write_to_chat called via VPS CDP Bridge: '{prompt[:40]}...' (submit={submit})")
+        logger.info(f"dispatch_write_to_chat called: '{prompt[:40]}...' (submit={submit})")
 
-        # 1. Execute direct typing via Linux VPS CDP Bridge (native hardware-level input directly inside Antigravity)
+        # 1. If an in-tab browser client (Safari / Chrome extension) is connected, dispatch directly to it
+        if connected_clients:
+            logger.info("Dispatching write_to_chat directly to active in-tab browser client...")
+            last_write_event.clear()
+            last_write_success[0] = False
+            for ws in list(connected_clients):
+                try:
+                    await ws.send_json({
+                        "type": "client_write_to_chat",
+                        "prompt": prompt,
+                        "submit": submit,
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to dispatch to client ws: {e}")
+
+            try:
+                await asyncio.wait_for(last_write_event.wait(), timeout=3.5)
+                if last_write_success[0]:
+                    logger.info("In-tab browser client successfully wrote to chat!")
+                    return {
+                        "success": True,
+                        "source": "in_tab_client",
+                        "prompt": prompt,
+                        "submit": submit
+                    }
+                else:
+                    logger.warning("In-tab browser client reported write failure; falling back to VPS CDP...")
+            except asyncio.TimeoutError:
+                logger.warning("Timed out waiting for in-tab browser client; falling back to VPS CDP...")
+
+        # 2. Fallback to VPS CDP Bridge (native hardware-level input directly inside VPS Antigravity)
+        logger.info(f"Executing typing via Linux VPS CDP Bridge: '{prompt[:40]}...' (submit={submit})")
         cdp_res = await cdp_bridge.write_and_submit_prompt(prompt, submit=submit)
         success = cdp_res.get("success", False)
 
-        # 2. Broadcast status to connected clients (iPad Safari tab / PWA)
         for client_ws in list(connected_clients):
             try:
                 await client_ws.send_json({
@@ -336,19 +366,6 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
                 })
             except Exception as e:
                 logger.warning(f"Could not notify client ws: {e}")
-
-        # 3. Fallback: if CDP failed, dispatch to in-tab client
-        if not success:
-            logger.info("CDP bridge did not succeed; dispatching to in-tab client as fallback...")
-            for ws in list(connected_clients):
-                try:
-                    await ws.send_json({
-                        "type": "client_write_to_chat",
-                        "prompt": prompt,
-                        "submit": submit,
-                    })
-                except Exception:
-                    pass
 
         return {
             "success": bool(success),

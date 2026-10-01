@@ -1,0 +1,204 @@
+/* Antigravity Voice Butler - In-Page Floating Orb Styles */
+
+#ag-voice-butler-root {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 2147483640;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.ag-orb-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Floating Orb Wrapper */
+.ag-orb-wrapper {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.45));
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ag-orb-wrapper:active {
+  cursor: grabbing;
+  transform: scale(0.96);
+}
+
+/* Glowing Aura Layer */
+.ag-orb-aura {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.4) 0%, rgba(56, 189, 248, 0.2) 60%, transparent 80%);
+  filter: blur(12px);
+  transform: scale(1);
+  transition: transform 0.15s ease-out, opacity 0.2s ease;
+  pointer-events: none;
+  animation: ag-pulse 3s infinite ease-in-out;
+}
+
+/* Core Orb sphere */
+.ag-orb {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #38bdf8 0%, #6366f1 50%, #4338ca 90%);
+  box-shadow: inset 0 -4px 10px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.ag-orb-inner {
+  width: 24px;
+  height: 24px;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.ag-orb-inner svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* State variants */
+.ag-orb-wrapper.listening .ag-orb {
+  background: radial-gradient(circle at 35% 30%, #4ade80 0%, #10b981 50%, #047857 90%);
+  animation: ag-listen-pulse 1.2s infinite ease-in-out;
+}
+.ag-orb-wrapper.listening .ag-orb-aura {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.6) 0%, rgba(52, 211, 153, 0.3) 60%, transparent 80%);
+  animation: none;
+}
+
+.ag-orb-wrapper.thinking .ag-orb {
+  background: radial-gradient(circle at 35% 30%, #fbbf24 0%, #f59e0b 50%, #b45309 90%);
+  animation: ag-spin 2s infinite linear;
+}
+.ag-orb-wrapper.thinking .ag-orb-aura {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.5) 0%, rgba(251, 191, 36, 0.25) 60%, transparent 80%);
+}
+
+.ag-orb-wrapper.speaking .ag-orb {
+  background: radial-gradient(circle at 35% 30%, #38bdf8 0%, #0284c7 50%, #0369a1 90%);
+  animation: ag-speak-wave 1s infinite alternate;
+}
+.ag-orb-wrapper.speaking .ag-orb-aura {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.6) 0%, rgba(14, 165, 233, 0.3) 60%, transparent 80%);
+}
+
+/* Controls Pill */
+.ag-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  padding: 6px 14px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.ag-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+  box-shadow: 0 0 8px #94a3b8;
+}
+
+.ag-status-dot.connected {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.ag-status-dot.listening {
+  background: #34d399;
+  box-shadow: 0 0 10px #34d399;
+}
+
+.ag-status-dot.thinking {
+  background: #fbbf24;
+  box-shadow: 0 0 10px #fbbf24;
+}
+
+.ag-status-dot.speaking {
+  background: #38bdf8;
+  box-shadow: 0 0 10px #38bdf8;
+}
+
+.ag-status-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.ag-btn-icon {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.ag-btn-icon:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ag-btn-icon.active {
+  color: #38bdf8;
+}
+
+/* Animations */
+@keyframes ag-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+@keyframes ag-listen-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes ag-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes ag-speak-wave {
+  0% { transform: scale(0.98); }
+  100% { transform: scale(1.06); }
+}

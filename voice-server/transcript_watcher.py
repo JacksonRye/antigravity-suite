@@ -541,8 +541,16 @@ class TranscriptWatcher:
 
     def get_ide_active_conversation_id(self):
         """Directly queries Antigravity's active Electron window via local Chrome DevTools port."""
-        port_file = os.path.expanduser("~/Library/Application Support/Antigravity/DevToolsActivePort")
-        if not os.path.exists(port_file):
+        port_file_candidates = [
+            os.path.expanduser("~/.config/Antigravity/DevToolsActivePort"),  # Linux VPS
+            os.path.expanduser("~/Library/Application Support/Antigravity/DevToolsActivePort"),  # macOS
+        ]
+        port_file = None
+        for p in port_file_candidates:
+            if os.path.exists(p):
+                port_file = p
+                break
+        if not port_file:
             return None
         try:
             with open(port_file, "r") as f:

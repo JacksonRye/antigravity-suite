@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Butler Companion</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="sp-container">
+    <!-- Header -->
+    <header class="sp-header">
+      <div class="sp-brand">
+        <div class="sp-logo-orb"></div>
+        <div class="sp-brand-text">
+          <h1>Voice Butler</h1>
+          <span class="sp-badge">Gemini Live</span>
+        </div>
+      </div>
+      <div class="sp-header-actions">
+        <div class="sp-status-pill" id="statusPill">
+          <span class="sp-status-dot" id="statusDot"></span>
+          <span class="sp-status-text" id="statusText">Offline</span>
+        </div>
+        <button class="sp-icon-btn" id="openSettingsBtn" title="Extension Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Stage / Audio Orb Banner -->
+    <div class="sp-stage">
+      <div class="sp-orb-display" id="spOrbDisplay">
+        <div class="sp-orb-glow" id="spOrbGlow"></div>
+        <div class="sp-orb-core">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+          </svg>
+        </div>
+      </div>
+      <div class="sp-prompt" id="spPrompt">Tap mic or use in-page floating orb</div>
+    </div>
+
+    <!-- Live Transcript Feed -->
+    <section class="sp-transcript-section">
+      <div class="sp-section-title">
+        <span>Spoken Dialogue</span>
+        <button class="sp-clear-btn" id="clearTranscriptBtn">Clear</button>
+      </div>
+      <div class="sp-feed" id="spFeed">
+        <div class="sp-message sp-assistant welcome">
+          <div class="sp-avatar">✨</div>
+          <div class="sp-msg-content">
+            <div class="sp-text">Voice Butler ready. Connected to Antigravity Remote Control.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Controls Dock -->
+    <footer class="sp-dock">
+      <div class="sp-actions">
+        <button class="sp-mic-btn" id="spMicBtn" title="Tap to talk / Stop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+          </svg>
+        </button>
+
+        <button class="sp-control-btn sp-interrupt-btn" id="spInterruptBtn" title="Stop Speaking">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>
+          </svg>
+          <span>Interrupt</span>
+        </button>
+
+        <label class="sp-toggle-wrap" title="Automatic Hands-Free Voice Detection">
+          <input type="checkbox" id="spHandsFreeCheck">
+          <span class="sp-toggle-track"></span>
+          <span class="sp-toggle-text">Hands-Free</span>
+        </label>
+      </div>
+
+      <!-- Text input fallback -->
+      <form class="sp-input-form" id="spTextForm">
+        <input type="text" id="spTextInput" placeholder="Message Gemini Live..." autocomplete="off">
+        <button type="submit" class="sp-send-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

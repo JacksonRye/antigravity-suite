@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antigravity Remote Control - Preview Test</title>
+  <style>
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+    .header {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 20px;
+      margin-bottom: 20px;
+    }
+    .chat-box {
+      flex: 1;
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 20px;
+      overflow-y: auto;
+      margin-bottom: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .input-container {
+      display: flex;
+      gap: 12px;
+    }
+    .editable-input {
+      flex: 1;
+      min-height: 44px;
+      background: #090d16;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: white;
+      font-size: 14px;
+      outline: none;
+    }
+    .editable-input:focus {
+      border-color: #6366f1;
+    }
+    .send-btn {
+      background: #6366f1;
+      border: none;
+      color: white;
+      border-radius: 8px;
+      padding: 0 20px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .msg {
+      margin-bottom: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>Antigravity Remote Control (Simulation)</h2>
+    <p style="color: #94a3b8; font-size: 13px; margin-top: 4px;">
+      This page simulates the Antigravity Remote Web interface. Notice the floating Voice Butler orb in the bottom right corner!
+    </p>
+  </div>
+
+  <div class="chat-box" id="chatBox">
+    <div class="msg"><strong>Agent:</strong> Antigravity workspace ready. What are we building today?</div>
+  </div>
+
+  <div class="input-container">
+    <div
+      class="editable-input"
+      contenteditable="true"
+      aria-label="Message input"
+      placeholder="Type a prompt for Antigravity or speak to the Voice Butler..."
+    ></div>
+    <button class="send-btn" aria-label="Send message" id="sendBtn">Send</button>
+  </div>
+
+  <script>
+    const input = document.querySelector('[aria-label="Message input"]');
+    const sendBtn = document.getElementById('sendBtn');
+    const chatBox = document.getElementById('chatBox');
+
+    sendBtn.onclick = () => {
+      const text = input.innerText.trim();
+      if (!text) return;
+      const msg = document.createElement('div');
+      msg.className = 'msg';
+      msg.innerHTML = `<strong>Developer:</strong> ${text}`;
+      chatBox.appendChild(msg);
+      input.innerText = '';
+      chatBox.scrollTop = chatBox.scrollHeight;
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,437 @@
+:root {
+  --bg-primary: #090d16;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --accent: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.35);
+  --cyan: #38bdf8;
+  --emerald: #10b981;
+  --amber: #f59e0b;
+  --rose: #f43f5e;
+  --border: rgba(255, 255, 255, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sp-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: radial-gradient(circle at top, #1e1b4b 0%, var(--bg-primary) 65%);
+}
+
+/* Header */
+.sp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.sp-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sp-logo-orb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--cyan), var(--accent));
+  box-shadow: 0 0 10px var(--cyan);
+}
+
+.sp-brand-text h1 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.sp-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.sp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sp-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.sp-status-dot.connected {
+  background: var(--emerald);
+  box-shadow: 0 0 8px var(--emerald);
+}
+
+.sp-status-dot.listening {
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+
+.sp-status-dot.thinking {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+
+.sp-status-dot.speaking {
+  background: #818cf8;
+  box-shadow: 0 0 8px #818cf8;
+}
+
+.sp-icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.sp-icon-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Stage / Orb Banner */
+.sp-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 16px;
+  position: relative;
+}
+
+.sp-orb-display {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sp-orb-glow {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  filter: blur(14px);
+  transform: scale(1);
+  transition: transform 0.2s ease;
+}
+
+.sp-orb-core {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #38bdf8 0%, #6366f1 50%, #4338ca 90%);
+  box-shadow: inset 0 -4px 10px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.sp-orb-core svg {
+  width: 24px;
+  height: 24px;
+}
+
+.sp-prompt {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Transcript Section */
+.sp-transcript-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 16px;
+}
+
+.sp-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.sp-clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.sp-clear-btn:hover {
+  color: var(--rose);
+}
+
+.sp-feed {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+.sp-message {
+  display: flex;
+  gap: 10px;
+  line-height: 1.45;
+  font-size: 13px;
+}
+
+.sp-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+.sp-user .sp-avatar {
+  background: #312e81;
+}
+
+.sp-msg-content {
+  flex: 1;
+}
+
+.sp-text {
+  background: rgba(30, 41, 59, 0.6);
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  color: #e2e8f0;
+  word-break: break-word;
+}
+
+.sp-user .sp-text {
+  background: rgba(79, 70, 229, 0.2);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.sp-tool-tag {
+  font-size: 10px;
+  color: var(--cyan);
+  margin-top: 4px;
+  font-family: monospace;
+}
+
+/* Controls Dock */
+.sp-dock {
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sp-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sp-mic-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  border: none;
+  cursor: pointer;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.sp-mic-btn:hover {
+  transform: scale(1.05);
+}
+
+.sp-mic-btn.active {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
+}
+
+.sp-mic-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sp-control-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sp-control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.sp-interrupt-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--rose);
+  color: var(--rose);
+}
+
+/* Hands-Free Toggle */
+.sp-toggle-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sp-toggle-wrap input {
+  display: none;
+}
+
+.sp-toggle-track {
+  width: 28px;
+  height: 16px;
+  background: #334155;
+  border-radius: 9999px;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+.sp-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+}
+
+.sp-toggle-wrap input:checked + .sp-toggle-track {
+  background: var(--cyan);
+}
+
+.sp-toggle-wrap input:checked + .sp-toggle-track::after {
+  transform: translateX(12px);
+}
+
+/* Input Form */
+.sp-input-form {
+  display: flex;
+  gap: 8px;
+}
+
+.sp-input-form input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: white;
+  font-size: 12px;
+  outline: none;
+}
+
+.sp-input-form input:focus {
+  border-color: var(--accent);
+}
+
+.sp-send-btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.sp-send-btn svg {
+  width: 14px;
+  height: 14px;
+}

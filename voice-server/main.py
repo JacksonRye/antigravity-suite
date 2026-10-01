@@ -133,6 +133,16 @@ async def serve_core_script():
     )
 
 
+@app.get("/butler-extension.zip")
+async def download_extension_zip():
+    return FileResponse(
+        "frontend/butler-extension.zip",
+        media_type="application/zip",
+        filename="butler-extension.zip",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None = None):
     """WebSocket endpoint for Gemini Live."""
@@ -148,6 +158,10 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None =
     await websocket.accept()
     connected_clients.add(websocket)
     logger.info(f"WebSocket connection accepted (active clients: {len(connected_clients)})")
+
+    if conversation_id:
+        logger.info(f"Client connected with explicit conversation_id: {conversation_id}")
+        watcher.set_active_conversation(conversation_id, force=True)
 
     # Send current active conversation details to newly connected client
     try:

@@ -28,6 +28,7 @@ export interface CustomModel {
   maxRetries?: number;
   fallbackModel?: string;
   thinkingLevel?: string;
+  thinkingBudget?: number | string;
   noTools?: boolean;
 }
 
@@ -443,14 +444,30 @@ function handleCustomModelRequest(
     delete (payload as Record<string, unknown>).tools;
     delete (payload as Record<string, unknown>).toolConfig;
   }
-  // THINKING_LEVEL_PATCH
+  // THINKING CONFIG: Support dynamic auto-thinking (-1), budget, and thinkingLevel
   if (provider === 'google' && payload && typeof payload === 'object') {
     const genConfig = (((payload as Record<string, unknown>).generationConfig || {}) as Record<string, unknown>);
-    genConfig.thinkingConfig = {
-      thinkingLevel: model.thinkingLevel || 'MEDIUM',
-    };
-    delete (genConfig.thinkingConfig as Record<string, unknown>).thinkingBudget;
-    delete (genConfig.thinkingConfig as Record<string, unknown>).thinking_budget;
+    const thinkingConfig: Record<string, unknown> = {};
+
+    let budget: number | undefined;
+    if (typeof model.thinkingBudget === 'number') {
+      budget = model.thinkingBudget;
+    } else if (model.thinkingBudget === '-1' || model.thinkingLevel === '-1' || model.thinkingLevel === 'AUTO' || model.thinkingLevel === 'DYNAMIC') {
+      budget = -1;
+    } else if (model.thinkingLevel === 'OFF' || model.thinkingLevel === '0' || model.thinkingBudget === '0') {
+      budget = 0;
+    }
+
+    if (budget !== undefined) {
+      thinkingConfig.thinkingBudget = budget;
+    } else if (model.thinkingLevel && ['LOW', 'MEDIUM', 'HIGH'].includes(model.thinkingLevel.toUpperCase())) {
+      thinkingConfig.thinkingLevel = model.thinkingLevel.toUpperCase();
+    } else {
+      // Default: dynamic thinking budget (-1) so Gemini determines reasoning depth automatically without lag
+      thinkingConfig.thinkingBudget = -1;
+    }
+
+    genConfig.thinkingConfig = thinkingConfig;
     (payload as Record<string, unknown>).generationConfig = genConfig;
   }
   if (payload && typeof payload === 'object') {

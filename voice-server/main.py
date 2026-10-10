@@ -144,6 +144,15 @@ async def download_extension_zip():
     )
 
 
+@app.get("/updates.xml")
+async def serve_updates_xml():
+    return FileResponse(
+        "frontend/updates.xml",
+        media_type="application/xml",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: str | None = None):
     """WebSocket endpoint for Gemini Live."""

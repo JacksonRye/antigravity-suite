@@ -623,26 +623,10 @@ class TranscriptWatcher:
         target_conv_id = conv_id or path.split(os.sep)[-4]
         target_title = title.strip() or self.get_conversation_title(target_conv_id) or "another conversation"
 
-        # Check if Butler was actively speaking when tab switch occurred
-        was_speaking = self.is_speaking
-        if was_speaking:
-            # Stop audio playback and cancel ongoing speech task
+        # Stop any active audio playback when switching tabs
+        if self.is_speaking:
             self.stop_current_playback()
             self.is_speaking = False
-
-            # Verbal announcement: announce the conversation switch out loud
-            announcement = (
-                f"[SYSTEM EVENT: Tab switched while you were speaking. "
-                f"Immediately say out loud clearly: \"We've switched to {target_title}.\" "
-                "Do not add any extra chatter; just state this one sentence out loud and pause.]"
-            )
-            if self.on_agent_turn_completed:
-                try:
-                    res = self.on_agent_turn_completed(announcement)
-                    if asyncio.iscoroutine(res):
-                        asyncio.create_task(res)
-                except Exception as e:
-                    logger.error(f"Error broadcasting switch announcement: {e}")
 
         # 1. Save prior conversation state if leaving one
         if self.pinned_conversation_id and self.current_path:
@@ -862,6 +846,11 @@ class TranscriptWatcher:
                     step_to_speak = pending_step
                     pending_response = None
                     self.last_spoken_step = max(self.last_spoken_step, step_to_speak)
+
+                    if self.is_speaking:
+                        logger.info(f"Butler is already speaking; advancing last_spoken_step to {step_to_speak} and skipping speech trigger to prevent collision.")
+                        continue
+
                     logger.info(f"Response settled at step {step_to_speak}. Triggering Butler speech now.")
 
                     clean_text = re.sub(r"```[\s\S]*?```", "[code snippet]", to_speak)
